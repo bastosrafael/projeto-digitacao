@@ -1,6 +1,6 @@
 # Projeto Digitação
 
-Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O backend possui health check, chat por meio do OmniRoute local, deploy saudável no Coolify e acesso HTTPS pelo LocalTunnel. O código está publicado no GitHub.
+Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O backend possui health check, chat por meio do OmniRoute local e deploy saudável no Coolify. O acesso local estável está disponível em `127.0.0.1:18001`; o LocalTunnel público ainda não garantiu persistência de subdomínio após reinício.
 
 ## Arquitetura atual
 
@@ -9,11 +9,12 @@ Navegador local
   -> React + Vite em :5173
   -> POST relativo /api/chat
   -> proxy de desenvolvimento do Vite
-  -> HTTPS LocalTunnel
+  -> http://127.0.0.1:18001
 
-Internet / proxy Vite
-  -> HTTPS LocalTunnel (projeto-digitacao-api.loca.lt)
-  -> container localtunnel-projeto-digitacao (rede Docker coolify)
+Internet (temporário)
+  -> HTTPS LocalTunnel (hostname concedido pelo serviço)
+  -> container localtunnel-projeto-digitacao (network_mode host)
+  -> http://127.0.0.1:18001
   -> FastAPI no Coolify (porta interna 8000)
   -> OmniRoute na rede local (192.168.15.112:20128)
   -> rota/modelo configurado por OMNIROUTE_MODEL
@@ -22,7 +23,7 @@ Internet / proxy Vite
 
 O navegador nunca deve acessar o OmniRoute diretamente. A chave, quando necessária, existe somente como variável do backend.
 
-O frontend ainda não está publicado. Durante o desenvolvimento, o navegador usa somente `/api/chat`; o Vite encaminha a requisição para o backend e adiciona o header necessário do LocalTunnel.
+O frontend ainda não está publicado. Durante o desenvolvimento na HOMELAB, o navegador usa somente `/api/chat`; o Vite encaminha a requisição diretamente para o bind local estável do backend.
 
 ## Repositório
 
@@ -58,10 +59,10 @@ cp .env.example .env
 Variável disponível:
 
 ```dotenv
-VITE_DEV_PROXY_TARGET=https://projeto-digitacao-api.loca.lt
+VITE_DEV_PROXY_TARGET=http://127.0.0.1:18001
 ```
 
-Essa URL não é secret. O arquivo `.env` local não é versionado. Nenhuma variável ou chave do OmniRoute deve ser adicionada ao frontend.
+Essa URL não é secret. O arquivo `.env` local não é versionado. Nenhuma variável ou chave do OmniRoute deve ser adicionada ao frontend. Um destino HTTPS externo pode ser informado temporariamente nessa variável, mas não deve ser tratado como permanente enquanto o LocalTunnel não preservar o subdomínio após reinício.
 
 O serviço de API em `src/services/api.js` chama apenas `POST /api/chat`. Em desenvolvimento, `vite.config.js` encaminha `/api` para `VITE_DEV_PROXY_TARGET` e adiciona `bypass-tunnel-reminder: true`.
 
@@ -184,7 +185,7 @@ No dashboard do Coolify em `http://192.168.15.112:8000`:
 5. selecione a branch `main`;
 6. escolha build por Dockerfile;
 7. configure Base Directory como `/backend` e Dockerfile como `Dockerfile`;
-8. configure a porta interna/exposta como `8000`, sem publicar `8000:8000` diretamente no host;
+8. configure a porta interna/exposta como `8000` e o Port Mapping restrito a `127.0.0.1:18001:8000`;
 9. configure o health check HTTP com o caminho `/health`;
 10. adicione as variáveis abaixo no painel, marcando a chave como secret quando aplicável;
 11. salve e acione o deploy/redeploy;
@@ -194,7 +195,7 @@ Resumo da configuração:
 
 - use `backend/` como contexto de build e `backend/Dockerfile` como Dockerfile;
 - configure a porta interna da aplicação como `8000`;
-- não publique a porta 8000 diretamente no host;
+- publique somente o bind local `127.0.0.1:18001:8000`; nunca use `0.0.0.0:18001` nem `8000:8000`;
 - deixe o proxy/reverse proxy do Coolify encaminhar o domínio para a porta interna 8000 do container;
 - configure o health check HTTP com o caminho `/health`;
 - não altere o comando de inicialização da imagem, salvo necessidade comprovada.
@@ -213,14 +214,12 @@ A imagem `projeto-digitacao-backend:local` também foi construída e validada lo
 
 ### Validação do deploy
 
-Primeiro, confirme no Coolify que `/health` está saudável. Em seguida, use a URL real atribuída pelo operador:
+Primeiro, confirme no Coolify que `/health` está saudável e valide a rota local estável:
 
 ```bash
-export BACKEND_PUBLIC_URL='https://projeto-digitacao-api.loca.lt'
-curl --fail --show-error "$BACKEND_PUBLIC_URL/health"
-curl --fail --show-error -X POST "$BACKEND_PUBLIC_URL/api/chat" \
+curl --fail --show-error http://127.0.0.1:18001/health
+curl --fail --show-error -X POST http://127.0.0.1:18001/api/chat \
   -H 'Content-Type: application/json' \
-  -H 'bypass-tunnel-reminder: true' \
   -d '{"message":"Responda apenas: deploy funcionando"}'
 ```
 
@@ -228,23 +227,16 @@ O segundo teste comprova o fluxo Coolify -> `192.168.15.112:20128` -> OmniRoute 
 
 ### URL pública
 
-- Backend deste projeto: `https://projeto-digitacao-api.loca.lt`.
-- O container `localtunnel-projeto-digitacao` está na rede `coolify`, usa restart policy `unless-stopped` e encaminha HTTPS para a porta interna 8000 do backend.
+- Não existe atualmente um hostname LocalTunnel que possa ser documentado como endpoint público persistente.
+- O container `localtunnel-projeto-digitacao` usa `network_mode=host`, restart policy `unless-stopped` e aponta para `127.0.0.1:18001`.
+- O comando solicita `bastosrafael-projeto-digitacao-homelab-api`, mas o teste de restart recebeu outro hostname. URLs aleatórias observadas são apenas evidência diagnóstica e não devem entrar em configurações de produção.
 - O header `bypass-tunnel-reminder: true` evita a página intermediária do LocalTunnel em chamadas de API.
 - O container `localtunnel` original atende outro serviço na porta 3001 em `https://nflnba.loca.lt`. Ele não pertence ao Projeto Digitação e não deve ser alterado, removido ou reutilizado.
 
-### Estabilidade do destino interno
+### Estabilidade do acesso
 
-O túnel do projeto aponta atualmente para o nome completo do container gerado pelo Coolify. Esse nome inclui um sufixo da implantação e pode mudar em um redeploy. Na inspeção da Fase 3C, somente o nome completo resolvia no DNS da rede `coolify`; o UUID base e o nome lógico indicado pelas labels não resolviam. Portanto, o risco de quebra após redeploy permanece.
+A dependência do hostname efêmero do container Coolify foi eliminada. O Port Mapping persistido no Coolify é `127.0.0.1:18001:8000`, e o LocalTunnel usa a rede do host para alcançar esse endereço. Assim, um redeploy que troque o nome do container backend não altera o destino local do túnel.
 
-Não foi encontrada uma alteração segura que pudesse ser aplicada sem recriar o túnel ou modificar o proxy/rede do Coolify. Até existir um alias persistente suportado pela configuração da aplicação, após cada redeploy o operador deve:
+Na Fase 3D, o serviço público LocalTunnel não preservou o subdomínio solicitado após `docker restart`. O nome original `projeto-digitacao-api` foi recuperado em algumas inicializações, mas reinícios concederam nomes aleatórios. O fallback `projeto-digitacao-bastosrafael-api` também apresentou colisão com uma aplicação Kestrel. O nome mais exclusivo `bastosrafael-projeto-digitacao-homelab-api` funcionou antes do restart, porém o restart voltou a conceder uma URL aleatória.
 
-1. obter o novo nome com `docker ps --filter label=coolify.applicationId=3 --format '{{.Names}}'`;
-2. testar do container do túnel se `http://NOVO_NOME:8000/health` retorna HTTP 200;
-3. em uma janela de manutenção e com autorização explícita, recriar somente `localtunnel-projeto-digitacao` trocando `--local-host` pelo novo nome;
-4. preservar `--network coolify`, `--restart unless-stopped`, `--port 8000` e `--subdomain projeto-digitacao-api`;
-5. validar novamente `/health` e `/api/chat` externamente.
-
-Não execute esse procedimento preventivamente enquanto o túnel estiver funcionando. Não foi localizada uma opção comprovada de alias persistente para o tipo de aplicação atual.
-
-Uma solução definitiva suportada pelo modelo de rede do Coolify seria uma migração planejada para um único stack Docker Compose contendo serviços `backend` e `tunnel`. Dentro do mesmo stack, o túnel poderia usar `backend` como hostname estável. Essa migração deve ser feita manualmente pelo operador, sem redes customizadas nem portas publicadas no host, validada com um destino temporário e somente depois substituir a aplicação/túnel atuais. Ela não foi executada na Fase 3C. Referência: [Docker Compose Build Packs do Coolify](https://coolify.io/docs/applications/build-packs/docker-compose).
+Portanto, a rota local está estável, mas a Fase 3D pública permanece bloqueada pela ausência de garantia de subdomínio do LocalTunnel gratuito. Não iniciar a publicação Netlify usando uma URL aleatória. As alternativas para decisão futura, em ordem simples, são: manter o LocalTunnel apenas para testes efêmeros; usar um túnel com hostname reservado; ou configurar domínio/túnel próprio. Nenhuma alternativa adicional foi instalada automaticamente.

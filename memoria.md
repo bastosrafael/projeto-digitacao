@@ -444,3 +444,89 @@ sudo docker rm projeto-digitacao-backend-test
 - [x] Auditar bundle, ignores e secrets.
 - [x] Atualizar README e memória.
 - [x] Revisar Git, criar commit e fazer push (`feat: implementa frontend inicial de chat`).
+
+## 2026-08-08 — Fase 3D: estabilização do acesso externo
+
+### Resultado
+
+- Estabilização do destino interno concluída: o Coolify publica `127.0.0.1:18001:8000` e o backend continua ouvindo em `8000` dentro do container.
+- `ss` confirmou bind exclusivo em `127.0.0.1:18001`; não houve exposição em `0.0.0.0:18001`.
+- `GET http://127.0.0.1:18001/health`: HTTP 200, `server: uvicorn`, `{"status":"ok"}`.
+- O LocalTunnel deixou de depender do hostname efêmero do container Coolify e passou a usar `network_mode=host`, destino `127.0.0.1:18001` e restart policy `unless-stopped`.
+- A estabilização pública não foi concluída: o LocalTunnel gratuito não garantiu a reutilização de um subdomínio personalizado após `docker restart`.
+- Conforme o critério de parada da fase, nenhum túnel alternativo, domínio, proxy ou serviço adicional foi instalado.
+
+### Diagnóstico e tentativas do LocalTunnel
+
+- Estado inicial observado: o comando solicitava `projeto-digitacao-api`, mas a URL concedida era `https://selfish-monkey-100.loca.lt`.
+- A URL aleatória inicial foi validada: `GET /health` retornou HTTP 200 com Uvicorn e `POST /api/chat` retornou HTTP 200 com `{"response":"novo tunel funcionando"}`.
+- O hostname original respondeu HTTP/HTTPS 503 `Tunnel Unavailable` no início desta execução; a resposta Kestrel relatada anteriormente não estava mais ativa naquele momento.
+- Tentativa 1 recuperou `https://projeto-digitacao-api.loca.lt`; health e chat retornaram HTTP 200. Após restart, o LocalTunnel concedeu `https://green-cat-23.loca.lt`.
+- Tentativa 2 concedeu diretamente `https://hard-warthog-91.loca.lt`.
+- Tentativa 3 recuperou novamente o hostname original, mas após restart concedeu `https://ugly-termite-82.loca.lt`.
+- Fallback preferido `projeto-digitacao-bastosrafael-api` foi concedido, porém apresentou colisão/roteamento inconsistente: `GET /health` chegou a `Kestrel/ASP.NET` com HTTP 404, enquanto `POST /api/chat` chegou ao nosso Uvicorn. O nome foi descartado.
+- Fallback exclusivo solicitado: `bastosrafael-projeto-digitacao-homelab-api`. Antes do restart, dois GETs retornaram HTTP 200/Uvicorn e o chat retornou HTTP 200 com a frase solicitada, normalizada pelo modelo para `túnel estável funcionando`.
+- Foi adicionada ao comando do container uma carência de 15 segundos antes de iniciar o cliente LocalTunnel. Mesmo assim, após `docker restart`, o serviço concedeu `https://spotty-swan-71.loca.lt`.
+- Validação pós-restart da URL efetiva: `GET /health` HTTP 200/Uvicorn e `POST /api/chat` HTTP 200, confirmando backend e OmniRoute. O hostname solicitado retornou HTTP 503 `Tunnel Unavailable`.
+- Conclusão: **LocalTunnel público não garantiu persistência de subdomínio.** URLs aleatórias não são endpoints aceitáveis para produção ou Netlify.
+
+### Configuração final observada do container do projeto
+
+- Nome: `localtunnel-projeto-digitacao`.
+- Imagem: `node:20-alpine`.
+- `network_mode`: `host`.
+- Restart policy: `unless-stopped`.
+- Destino: `127.0.0.1:18001`.
+- Subdomínio sempre solicitado pelo comando: `bastosrafael-projeto-digitacao-homelab-api`.
+- O comando instala o cliente LocalTunnel, aguarda 15 segundos e executa `lt --port 18001 --local-host 127.0.0.1 --subdomain bastosrafael-projeto-digitacao-homelab-api --print-requests`.
+- URL efetivamente concedida após o último restart da validação: `https://spotty-swan-71.loca.lt`, considerada temporária e não configurada no frontend.
+
+### Preservação de infraestrutura e frontend
+
+- O container `localtunnel` do serviço `https://nflnba.loca.lt` permaneceu running, com o mesmo ID observado `c7666f7b9a8f`, rede host e comando para a porta 3001; não foi parado, removido, reiniciado ou alterado.
+- Coolify, backend, OmniRoute, firewall, proxy e redes Docker globais não foram alterados nesta execução.
+- Nenhum componente, CSS, layout ou identidade visual do frontend foi alterado.
+- O proxy técnico do Vite e `frontend/.env.example` passaram a usar por padrão `http://127.0.0.1:18001`, evitando depender de URL pública aleatória durante o desenvolvimento local.
+- Nenhum secret ou variável do OmniRoute foi adicionado ao frontend.
+
+### Testes do projeto
+
+- Backend: `.venv/bin/python -m pytest -q` retornou `3 passed in 0.97s`.
+- Frontend: `npm run lint` concluído sem erros.
+- Frontend: `npm run build` concluído com Vite 8.2.1 e 20 módulos transformados.
+- Proxy Vite atualizado: `POST http://127.0.0.1:5173/api/chat` retornou HTTP 200/Uvicorn com `{"response":"proxy local funcionando"}`, comprovando Vite -> `127.0.0.1:18001` -> FastAPI -> OmniRoute.
+- O servidor Vite temporário foi encerrado após o teste.
+
+### Problemas e decisões
+
+- Problema resolvido: o hostname interno do container Coolify mudava em redeploys.
+- Solução: Port Mapping persistente e restrito `127.0.0.1:18001:8000`, acessado pelo túnel em rede host.
+- Problema não resolvido: o serviço público LocalTunnel pode ignorar `--subdomain` e conceder hostname aleatório, inclusive após ter concedido o nome personalizado antes do restart.
+- Decisão: não aceitar hostname aleatório, não prosseguir para Netlify e não instalar automaticamente outro provedor de túnel.
+
+### Arquivos modificados
+
+- `frontend/vite.config.js`: destino padrão do proxy alterado somente de forma técnica para `http://127.0.0.1:18001`.
+- `frontend/.env.example`: exemplo atualizado para o bind local estável.
+- `README.md`: arquitetura, Port Mapping, estado do LocalTunnel e bloqueio público documentados.
+- `memoria.md`: registro da Fase 3D.
+
+### Próximo passo
+
+- O operador deve escolher uma opção de endpoint público com hostname garantido antes da Fase 4B: túnel com hostname reservado, domínio/túnel próprio ou aceitar LocalTunnel apenas para testes efêmeros. Não publicar o frontend no Netlify apontando para uma URL aleatória.
+
+### Checklist da Fase 3D
+
+- [x] Ler memória, README e Git antes de agir.
+- [x] Confirmar `127.0.0.1:18001 -> 8000` e health local.
+- [x] Remover a dependência do hostname efêmero do container Coolify.
+- [x] Manter `network_mode=host` e `unless-stopped` no túnel do projeto.
+- [x] Validar health e chat externos antes e depois de restart.
+- [x] Limitar a três tentativas do hostname original.
+- [x] Testar fallbacks determinísticos e rejeitar colisão/hostname aleatório.
+- [x] Preservar integralmente o túnel `nflnba`.
+- [x] Preservar a interface aprovada.
+- [x] Documentar o diagnóstico sem secrets.
+- [ ] Obter hostname público persistente após restart.
+- [ ] Considerar a Fase 3D pública concluída.
+- [ ] Iniciar Fase 4B/Netlify.
