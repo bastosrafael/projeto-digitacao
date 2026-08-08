@@ -1,12 +1,14 @@
 # Projeto Digitação
 
-Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O backend possui health check, chat por meio do OmniRoute local e execução validada em container Docker. O código está publicado no GitHub; o deploy no Coolify ainda depende de configuração autenticada no dashboard.
+Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O backend possui health check, chat por meio do OmniRoute local, deploy saudável no Coolify e acesso HTTPS pelo LocalTunnel. O código está publicado no GitHub.
 
 ## Arquitetura atual
 
 ```text
-Cliente
-  -> FastAPI (porta interna 8000)
+Internet
+  -> HTTPS LocalTunnel (projeto-digitacao-api.loca.lt)
+  -> container localtunnel-projeto-digitacao (rede Docker coolify)
+  -> FastAPI no Coolify (porta interna 8000)
   -> OmniRoute na rede local (192.168.15.112:20128)
   -> rota/modelo configurado por OMNIROUTE_MODEL
   -> resposta da IA
@@ -99,17 +101,17 @@ docker stop projeto-digitacao-backend-test
 docker rm projeto-digitacao-backend-test
 ```
 
-## Preparação para Coolify
+## Deploy no Coolify
 
-O deploy ainda não foi realizado. A API administrativa local exige autenticação e nenhuma credencial de automação foi fornecida ao projeto, portanto a criação deve ser feita no dashboard por um operador autorizado.
+O deploy foi realizado manualmente por um operador autorizado e está Running/Healthy. A aplicação usa a imagem gerada pelo Dockerfile do backend, escuta em `0.0.0.0:8000` dentro do container e acessa o OmniRoute pela LAN.
 
-### Configuração da aplicação
+### Configuração atual e referência para redeploy
 
 No dashboard do Coolify em `http://192.168.15.112:8000`:
 
 1. entre com uma conta autorizada;
-2. crie ou selecione o projeto `projeto-digitacao`;
-3. adicione uma aplicação chamada `projeto-digitacao-backend`;
+2. selecione o projeto que contém a aplicação; a label observada no deploy atual é `my-first-project`;
+3. selecione a aplicação do Projeto Digitação;
 4. escolha GitHub como fonte e o repositório `bastosrafael/projeto-digitacao`;
 5. selecione a branch `main`;
 6. escolha build por Dockerfile;
@@ -117,7 +119,7 @@ No dashboard do Coolify em `http://192.168.15.112:8000`:
 8. configure a porta interna/exposta como `8000`, sem publicar `8000:8000` diretamente no host;
 9. configure o health check HTTP com o caminho `/health`;
 10. adicione as variáveis abaixo no painel, marcando a chave como secret quando aplicável;
-11. salve e acione o deploy;
+11. salve e acione o deploy/redeploy;
 12. confirme nos logs que o Uvicorn iniciou em `0.0.0.0:8000` e que o health check ficou saudável.
 
 Resumo da configuração:
@@ -139,17 +141,18 @@ OMNIROUTE_MODEL=auto/coding:free
 
 Se o OmniRoute local continuar sem exigir autenticação, `OMNIROUTE_API_KEY` pode permanecer vazia. A chave, quando necessária, deve existir somente como variável protegida do backend.
 
-A imagem `projeto-digitacao-backend:local` foi construída e validada com `/health` e `/api/chat`. Excel, frontend e deploy não fazem parte do estado atual.
+A imagem `projeto-digitacao-backend:local` também foi construída e validada localmente. Excel e frontend ainda não fazem parte do estado atual.
 
-### Validação depois do deploy
+### Validação do deploy
 
 Primeiro, confirme no Coolify que `/health` está saudável. Em seguida, use a URL real atribuída pelo operador:
 
 ```bash
-export BACKEND_PUBLIC_URL='https://endereco-real-configurado'
+export BACKEND_PUBLIC_URL='https://projeto-digitacao-api.loca.lt'
 curl --fail --show-error "$BACKEND_PUBLIC_URL/health"
 curl --fail --show-error -X POST "$BACKEND_PUBLIC_URL/api/chat" \
   -H 'Content-Type: application/json' \
+  -H 'bypass-tunnel-reminder: true' \
   -d '{"message":"Responda apenas: deploy funcionando"}'
 ```
 
@@ -157,4 +160,23 @@ O segundo teste comprova o fluxo Coolify -> `192.168.15.112:20128` -> OmniRoute 
 
 ### URL pública
 
-O `localtunnel` existente nesta homelab atende outro serviço na porta 3001 e usa `https://nflnba.loca.lt`. Ele não aponta para este backend e não deve ser substituído. Nenhuma URL pública foi atribuída ao backend. Depois do deploy, o operador deve configurar um domínio/túnel HTTPS aprovado para a aplicação sem interromper o túnel atual.
+- Backend deste projeto: `https://projeto-digitacao-api.loca.lt`.
+- O container `localtunnel-projeto-digitacao` está na rede `coolify`, usa restart policy `unless-stopped` e encaminha HTTPS para a porta interna 8000 do backend.
+- O header `bypass-tunnel-reminder: true` evita a página intermediária do LocalTunnel em chamadas de API.
+- O container `localtunnel` original atende outro serviço na porta 3001 em `https://nflnba.loca.lt`. Ele não pertence ao Projeto Digitação e não deve ser alterado, removido ou reutilizado.
+
+### Estabilidade do destino interno
+
+O túnel do projeto aponta atualmente para o nome completo do container gerado pelo Coolify. Esse nome inclui um sufixo da implantação e pode mudar em um redeploy. Na inspeção da Fase 3C, somente o nome completo resolvia no DNS da rede `coolify`; o UUID base e o nome lógico indicado pelas labels não resolviam. Portanto, o risco de quebra após redeploy permanece.
+
+Não foi encontrada uma alteração segura que pudesse ser aplicada sem recriar o túnel ou modificar o proxy/rede do Coolify. Até existir um alias persistente suportado pela configuração da aplicação, após cada redeploy o operador deve:
+
+1. obter o novo nome com `docker ps --filter label=coolify.applicationId=3 --format '{{.Names}}'`;
+2. testar do container do túnel se `http://NOVO_NOME:8000/health` retorna HTTP 200;
+3. em uma janela de manutenção e com autorização explícita, recriar somente `localtunnel-projeto-digitacao` trocando `--local-host` pelo novo nome;
+4. preservar `--network coolify`, `--restart unless-stopped`, `--port 8000` e `--subdomain projeto-digitacao-api`;
+5. validar novamente `/health` e `/api/chat` externamente.
+
+Não execute esse procedimento preventivamente enquanto o túnel estiver funcionando. Não foi localizada uma opção comprovada de alias persistente para o tipo de aplicação atual.
+
+Uma solução definitiva suportada pelo modelo de rede do Coolify seria uma migração planejada para um único stack Docker Compose contendo serviços `backend` e `tunnel`. Dentro do mesmo stack, o túnel poderia usar `backend` como hostname estável. Essa migração deve ser feita manualmente pelo operador, sem redes customizadas nem portas publicadas no host, validada com um destino temporário e somente depois substituir a aplicação/túnel atuais. Ela não foi executada na Fase 3C. Referência: [Docker Compose Build Packs do Coolify](https://coolify.io/docs/applications/build-packs/docker-compose).

@@ -270,7 +270,81 @@ sudo docker rm projeto-digitacao-backend-test
 - [x] Preservar o localtunnel existente da porta 3001.
 - [x] Executar testes automatizados.
 - [x] Atualizar README e memória.
-- [ ] Deploy Coolify (pendente de autenticação/operador).
-- [ ] Validar Coolify -> OmniRoute (pendente do deploy).
-- [ ] Configurar e validar URL HTTPS externa (pendente de decisão do operador).
+- [x] Deploy Coolify (concluído manualmente pelo operador depois do commit `8b4aea3`).
+- [x] Validar Coolify -> OmniRoute (HTTP 200 com resposta `coolify funcionando`).
+- [x] Configurar e validar URL HTTPS externa (concluído manualmente e revalidado na Fase 3C).
 - [x] Criar commit final e fazer push (`chore: prepara deploy do backend no coolify`).
+
+### Atualização posterior da Fase 3B
+
+- Fase 3B concluída manualmente pelo operador após o registro inicial acima.
+- GitHub concluído: repositório `https://github.com/bastosrafael/projeto-digitacao.git`, branch `main`.
+- Coolify concluído: aplicação criada, deploy do commit `8b4aea3` realizado e estado Running/Healthy.
+- Variáveis configuradas no Coolify somente pelos nomes: `OMNIROUTE_BASE_URL`, `OMNIROUTE_MODEL`, `OMNIROUTE_API_KEY`. Nenhum valor secreto foi registrado.
+- Backend confirmado em `0.0.0.0:8000` dentro do container.
+- `GET /health` interno: HTTP 200, `{"status":"ok"}`.
+- `POST /api/chat` interno: HTTP 200, `{"response":"coolify funcionando"}`.
+- Coolify -> OmniRoute -> `auto/coding:free`: confirmado.
+
+## 2026-08-08 — Fase 3C: finalização do acesso externo
+
+### Estado do deploy e do túnel
+
+- Container do backend observado: `3612b2a5ec37`, nome `bc9syuqtenojm8hr7l8uxh6f-194104617028`. Ambos são efêmeros e não devem ser usados como identificadores permanentes.
+- Backend Coolify: running e healthy, imagem correspondente ao commit `8b4aea3666e72e9bb866a494f612ff11b22dfdac`.
+- Container do projeto: `localtunnel-projeto-digitacao`, imagem `node:20-alpine`.
+- Estado inspecionado: running.
+- Rede: `coolify`.
+- Restart policy: `unless-stopped`.
+- Docker: serviço `enabled` e `active`; o container deve reiniciar após reinício do daemon/HOMELAB, desde que não tenha sido parado manualmente.
+- Comando real: instala `localtunnel` e executa `lt --port 8000 --local-host bc9syuqtenojm8hr7l8uxh6f-194104617028 --subdomain projeto-digitacao-api --print-requests`.
+- URL confirmada: `https://projeto-digitacao-api.loca.lt`.
+- O container `localtunnel` original, em rede host, continua atendendo a porta 3001 e `https://nflnba.loca.lt`; não foi alterado.
+
+### Validações externas
+
+- Teste externo realizado previamente pelo operador: `POST /api/chat` retornou HTTP 200 com `{"response":"acesso externo funcionando"}`.
+- Fase 3C, `GET https://projeto-digitacao-api.loca.lt/health`: HTTP 200, `{"status":"ok"}`.
+- Fase 3C, `POST https://projeto-digitacao-api.loca.lt/api/chat`: HTTP 200, `{"response":"fase 3c validada"}`.
+- Foi usado `bypass-tunnel-reminder: true`; nenhum secret foi enviado.
+- Fluxo confirmado: Internet -> HTTPS LocalTunnel -> rede `coolify` -> FastAPI:8000 -> OmniRoute:20128 -> `auto/coding:free` -> resposta.
+
+### Análise de estabilidade do hostname
+
+- Risco confirmado e ainda não resolvido: o `--local-host` usa o nome completo do container de uma implantação do Coolify.
+- Aliases Docker observados no backend: apenas repetições do nome completo `bc9syuqtenojm8hr7l8uxh6f-194104617028`.
+- O UUID base `bc9syuqtenojm8hr7l8uxh6f` não resolveu por DNS a partir do túnel e o health falhou.
+- O nome lógico de `coolify.resourceName`/`coolify.serviceName` também não resolveu.
+- O destino atual completo resolveu e retornou HTTP 200 em `/health`.
+- O `coolify-proxy` não forneceu uma rota interna comprovadamente utilizável para a aplicação; não foi modificado.
+- Nenhuma rede, alias, proxy ou container foi alterado, pois uma mudança agora exigiria operação potencialmente disruptiva no túnel funcionando.
+- Alternativa operacional simples: depois de cada redeploy, descobrir o novo container pela label `coolify.applicationId=3`, validar `/health` internamente e, somente com autorização/janela de manutenção, recriar apenas `localtunnel-projeto-digitacao` com o novo `--local-host`.
+- A documentação oficial confirma que nomes de serviço funcionam como hostnames estáveis dentro de um mesmo stack Docker Compose; não foi encontrada uma opção comprovada de alias persistente para a aplicação atual baseada somente em Dockerfile.
+- Solução definitiva preferida para uma fase futura: migração planejada para um único stack Docker Compose com serviços `backend` e `tunnel`, sem redes customizadas nem portas de host, permitindo `--local-host backend`. Essa mudança é estrutural e não foi executada nesta fase.
+
+### Testes automatizados
+
+- `.venv/bin/python -m pytest -q`: `3 passed in 0.84s`.
+- Nenhum teste foi removido ou alterado.
+
+### Arquivos modificados
+
+- `README.md`: estado real do deploy, arquitetura externa, URL, LocalTunnel e risco de hostname efêmero.
+- `memoria.md`: correção da Fase 3B e registro integral da Fase 3C.
+
+### Próximo passo
+
+- Antes de qualquer redeploy, decidir entre migrar backend+túnel para um stack Docker Compose com hostname de serviço estável ou aceitar o procedimento manual de atualizar somente o túnel do projeto. Depois da validação da Fase 3C, iniciar a Fase 4 sem alterar o túnel `nflnba`.
+
+### Checklist da Fase 3C
+
+- [x] Ler memória, README e estado Git antes de modificar arquivos.
+- [x] Inspecionar containers, túnel, comando, rede, logs e restart policy.
+- [x] Confirmar persistência com Docker enabled e `unless-stopped`.
+- [x] Validar `/health` externo.
+- [x] Validar uma única chamada externa `/api/chat`.
+- [x] Analisar aliases e proxy sem alterar infraestrutura.
+- [x] Preservar os dois túneis e todos os serviços existentes.
+- [x] Executar testes automatizados.
+- [x] Atualizar README e memória.
+- [x] Auditar secrets, criar commit e fazer push (`docs: registra deploy e acesso externo`).
