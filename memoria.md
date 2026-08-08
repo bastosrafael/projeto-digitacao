@@ -619,9 +619,8 @@ sudo docker rm projeto-digitacao-backend-test
 
 ### Próximo passo
 
-- Configurar manualmente no Coolify o storage persistente `/opt/projeto-digitacao/data/uploads:/data/uploads` e as três variáveis de upload; depois redeployar o backend e validar um upload real pelo frontend Netlify/Tailscale.
-- Os commits da implementação devem permanecer somente locais até o storage estar configurado, evitando que o Auto Deploy publique a versão de upload sobre filesystem efêmero.
-- Somente após essa validação iniciar inspeção/leitura do Excel. Ainda não implementar produtos ou imagens.
+- Fase 5A concluída em produção com storage persistente, backend e frontend validados.
+- Não iniciar automaticamente a Fase 5B. A inspeção/leitura do Excel, produtos e imagens continua reservada ao roadmap permanente abaixo.
 
 ### Checklist
 
@@ -640,8 +639,8 @@ sudo docker rm projeto-digitacao-backend-test
 - [x] Validar arquivo de 36.236.835 bytes.
 - [x] Auditar disco e mount atual.
 - [x] Testar bind persistente em container temporário.
-- [ ] Configurar persistent storage no Coolify e redeployar.
-- [ ] Validar upload público real em produção.
+- [x] Configurar persistent storage no Coolify e redeployar.
+- [x] Validar upload público real em produção.
 - [ ] Iniciar leitura/inspeção do XLSX.
 
 ### Auditoria de retomada da Fase 5A — 2026-08-08
@@ -655,6 +654,22 @@ sudo docker rm projeto-digitacao-backend-test
 - Solução necessária: operador deve adicionar no Coolify o bind mount RW `projeto-digitacao-uploads`, Source `/opt/projeto-digitacao/data/uploads`, Destination `/data/uploads`, e configurar as três variáveis como Runtime ON/Buildtime OFF.
 - Próximo passo: após confirmação manual, publicar os commits locais, acompanhar o deploy e validar mount, endpoints, upload e persistência antes de marcar a Fase 5A como concluída.
 - Checklist da retomada: roadmap permanente registrado; storage e variáveis auditados; bind/Funnel preservados; push, deploy e Fase 5B não iniciados.
+
+### Conclusão da Fase 5A — 2026-08-08
+
+- A configuração persistida do Coolify foi confirmada no registro `local_file_volumes` como Directory Mount (`is_directory=true`), Source `/opt/projeto-digitacao/data/uploads`, Destination `/data/uploads`, sem sufixo para PR e sem modo read-only.
+- Variáveis confirmadas: `MAX_UPLOAD_SIZE_MB=200`, `UPLOAD_DIR=/data/uploads` e `CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app`, todas com Runtime ON e Buildtime OFF.
+- Commits `96e4011`, `656d36f` e `c521b41` publicados em `origin/main` por push normal, sem force push.
+- O Auto Deploy do Coolify não iniciou; foi feito redeploy manual seguro, sem force rebuild. Deployment `vxulg6ka8l73jgcz04dslxl9` finalizado no commit `c521b41e48f0c2cb39dd7142cb1d148fcdb8b4f3`.
+- Novo container `1275c1197718` validado como `running/healthy`, mantendo `127.0.0.1:18001:8000`.
+- `docker inspect` confirmou bind persistente `rw`: `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`; o diretório existe, é gravável e está sobre ext4 montado como RW.
+- `GET /health` local e público: HTTP 200 com `{"status":"ok"}`.
+- `GET /api/uploads/config` local e público: HTTP 200 com limite de 200 MB e extensão `.xlsx`.
+- Upload público sintético de 1002 bytes: HTTP 201, `file_id=3fafbb6e-dd5d-4892-86cc-3ce887ecb421`, arquivo UUID com modo 600, hash preservado e sem exposição do caminho físico na resposta.
+- A persistência foi comprovada pela presença do mesmo arquivo no Source do host e no Destination do container através do bind mount. O dado não reside no filesystem efêmero do container.
+- Frontend Netlify validado em Firefox headless: clipe funcional, seletor `.xlsx`, nome e tamanho visíveis, remoção antes do envio e upload concluído (`file_id=652c25d7-c588-4b2f-ab13-f06ee8f6b573`).
+- UI aprovada preservada; nenhuma alteração visual foi feita durante a validação.
+- **FASE 5A = CONCLUÍDA.** A Fase 5B não foi iniciada.
 
 ## ROADMAP APÓS FASE 5A — PACKING LIST / DUIMP
 

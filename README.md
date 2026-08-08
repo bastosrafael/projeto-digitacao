@@ -163,7 +163,7 @@ O backend lê o `UploadFile` em chunks de 1 MiB, conta os bytes e grava primeiro
 
 ### Storage persistente obrigatório no Coolify
 
-O container atualmente implantado foi inspecionado antes desta implementação e não possuía mounts (`mounts=[]`). **Não fazer redeploy para uso real do upload sem configurar storage persistente.**
+O storage persistente foi configurado e validado em produção na conclusão da Fase 5A, em 2026-08-08.
 
 Configuração recomendada no Coolify:
 
@@ -177,6 +177,8 @@ Configuração recomendada no Coolify:
 
 O diretório de origem está no filesystem ext4 `/dev/sda1`. Na inspeção de 2026-08-08, o filesystem tinha 106 GB totais, 67 GB utilizados e 34 GB disponíveis (67% de uso). Não foi criado quota ou volume artificialmente pequeno. Uma política de retenção/limpeza deverá ser adicionada em fase futura.
 
+O novo container foi confirmado como `running/healthy` com bind mount `rw`, Source `/opt/projeto-digitacao/data/uploads` e Destination `/data/uploads`. Um upload público real retornou HTTP 201 e produziu um arquivo UUID com modo 600 visível tanto em `/data/uploads` quanto no diretório do host. Como o arquivo reside no Source do bind, ele não depende do filesystem efêmero nem do ciclo de vida do container.
+
 O build do Netlify define `VITE_UPLOAD_API_BASE_URL=https://nflnba.tail08f125.ts.net:8443`. Essa URL é pública, não é secret e aparece no bundle por necessidade do upload direto. A chave do OmniRoute continua exclusivamente no Coolify.
 
 ### Validações de upload
@@ -187,7 +189,7 @@ O build do Netlify define `VITE_UPLOAD_API_BASE_URL=https://nflnba.tail08f125.ts
 - imagem `projeto-digitacao-backend:upload-local`: build concluído e upload validado com bind `/opt/projeto-digitacao/data/uploads:/data/uploads`;
 - arquivo persistido no teste do container com modo 600; container e artefatos temporários removidos após a validação.
 
-O código da Fase 5A está preparado localmente, mas a fase permanece bloqueada para produção até que o mount persistente acima seja criado no Coolify. O código não deve ser enviado ao GitHub antes dessa configuração, pois o Auto Deploy poderia iniciar uma versão que grava uploads no filesystem efêmero do container.
+**FASE 5A = CONCLUÍDA.** Backend, storage persistente, endpoints local/público, upload real e frontend Netlify foram validados. A interface visual aprovada foi preservada. A leitura ou análise do conteúdo da planilha permanece fora desta fase e deve começar somente na Fase 5B.
 
 ## Requisitos do backend
 
