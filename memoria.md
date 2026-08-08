@@ -583,12 +583,18 @@ sudo docker rm projeto-digitacao-backend-test
 - Um teste inicial montava incorretamente uma requisição GET com body; o helper de teste foi corrigido e toda a suíte foi repetida com sucesso.
 - Publicação automática indisponível porque a Netlify CLI não está instalada e não há autenticação Netlify confirmada. A preparação técnica foi concluída sem inventar credenciais.
 
-### Publicação pendente
+### Publicação concluída — atualização do operador
 
+- **FASE 4B: CONCLUÍDA.**
+- URL pública definitiva: `https://projeto-digitacao.netlify.app/`.
 - Repositório: `bastosrafael/projeto-digitacao`, branch `main`.
-- Configuração já versionada: base `frontend`, build `npm run build`, publish `dist` e Functions em `frontend/netlify/functions`.
-- Variável a configurar no Netlify, no escopo Functions/runtime: `BACKEND_BASE_URL=https://nflnba.tail08f125.ts.net:8443`.
-- Depois do primeiro deploy, registrar a URL Netlify e validar o carregamento do frontend e `POST /api/chat` pela URL pública.
+- Configuração aplicada: base `frontend`, build `npm run build`, publish `dist` e Functions em `frontend/netlify/functions`.
+- `BACKEND_BASE_URL` configurada no ambiente server-side/runtime do Netlify para o endpoint Tailscale estável, sem exposição no bundle.
+- Teste manual do frontend público: página carregou corretamente no navegador.
+- Teste manual do chat público: mensagem enviada e resposta correta recebida do backend.
+- Fluxo de produção confirmado: navegador -> Netlify frontend -> `POST /api/chat` -> Netlify Function -> Tailscale Funnel `:8443` -> `127.0.0.1:18001` -> Coolify/FastAPI `:8000` -> OmniRoute -> modelo -> resposta.
+- A interface aprovada permaneceu inalterada e continua **LOCKED / DO NOT ALTER WITHOUT AUTHORIZATION**, com referência no commit `fc53ebb` e tag `ui-v1-approved`.
+- LocalTunnel não faz parte da arquitetura de produção.
 
 ### Arquivos criados ou modificados
 
@@ -603,7 +609,7 @@ sudo docker rm projeto-digitacao-backend-test
 
 ### Próximo passo
 
-- Vincular o repositório à conta Netlify pela interface, configurar `BACKEND_BASE_URL`, executar o primeiro deploy e validar frontend/chat públicos. Não iniciar Excel antes dessa validação.
+- Aguardar autorização específica antes de iniciar a Fase 5/Excel. A publicação Netlify e o chat de produção já estão validados.
 
 ### Checklist da Fase 4B
 
@@ -617,7 +623,10 @@ sudo docker rm projeto-digitacao-backend-test
 - [x] Preservar o proxy Vite local para `127.0.0.1:18001`.
 - [x] Validar a Function localmente e contra o Funnel real.
 - [x] Executar lint, build e testes backend.
-- [ ] Publicar no Netlify e validar a URL pública (bloqueado apenas por autenticação/conta Netlify).
+- [x] Publicar no Netlify e validar a URL pública.
+- [x] Validar carregamento do frontend público.
+- [x] Validar chat público até o OmniRoute.
+- [x] Confirmar novamente que o design permanece LOCKED.
 - [ ] Iniciar Fase 5/Excel.
 
 ## 2026-08-08 — Fase 3E: Tailscale Funnel

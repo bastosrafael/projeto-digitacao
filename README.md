@@ -12,6 +12,7 @@ Navegador local
   -> http://127.0.0.1:18001
 
 Internet
+  -> https://projeto-digitacao.netlify.app/
   -> frontend estático no Netlify
   -> POST relativo /api/chat
   -> Netlify Function (proxy server-side)
@@ -91,7 +92,11 @@ npm run build
 
 ### Produção do frontend
 
-O repositório está preparado para publicação no Netlify, mas o primeiro deploy depende de vincular uma conta Netlify ao GitHub. A CLI não estava instalada/autenticada na HOMELAB durante a Fase 4B, portanto nenhuma URL de frontend foi inventada ou registrada.
+A Fase 4B foi concluída e o frontend está publicado em:
+
+`https://projeto-digitacao.netlify.app/`
+
+O deploy usa o repositório GitHub `bastosrafael/projeto-digitacao`, branch `main`, e a configuração versionada no `netlify.toml`.
 
 A configuração fica no `netlify.toml` da raiz:
 
@@ -117,7 +122,12 @@ cd /opt/projeto-digitacao/frontend
 npm run test:function
 ```
 
-Para publicar manualmente: no Netlify, escolha **Add new project** e **Import an existing project**, conecte o GitHub, selecione `bastosrafael/projeto-digitacao` e a branch `main`, confirme a configuração detectada pelo `netlify.toml`, adicione `BACKEND_BASE_URL` no escopo de Functions e inicie o deploy. Após a publicação, valide o frontend e `POST https://<site-netlify>/api/chat`.
+Validação manual de produção concluída no navegador:
+
+- `GET https://projeto-digitacao.netlify.app/`: frontend carregado corretamente;
+- interface aprovada preservada, sem alteração visual;
+- envio de mensagem pelo chat concluído com resposta correta;
+- fluxo confirmado: navegador -> Netlify -> Netlify Function -> Tailscale Funnel -> FastAPI/Coolify -> OmniRoute -> modelo -> resposta.
 
 ### Interface aprovada
 
@@ -242,7 +252,7 @@ OMNIROUTE_MODEL=auto/coding:free
 
 Se o OmniRoute local continuar sem exigir autenticação, `OMNIROUTE_API_KEY` pode permanecer vazia. A chave, quando necessária, deve existir somente como variável protegida do backend.
 
-A imagem `projeto-digitacao-backend:local` também foi construída e validada localmente. O frontend existe e está preparado para o Netlify; Excel ainda não faz parte do estado atual.
+A imagem `projeto-digitacao-backend:local` também foi construída e validada localmente. O frontend está publicado no Netlify; Excel ainda não faz parte do estado atual.
 
 ### Validação do deploy
 
