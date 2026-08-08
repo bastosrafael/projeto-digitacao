@@ -12,6 +12,9 @@ Navegador local
   -> http://127.0.0.1:18001
 
 Internet
+  -> frontend estático no Netlify
+  -> POST relativo /api/chat
+  -> Netlify Function (proxy server-side)
   -> HTTPS Tailscale Funnel :8443
   -> http://127.0.0.1:18001
   -> FastAPI no Coolify (porta interna 8000)
@@ -22,7 +25,7 @@ Internet
 
 O navegador nunca deve acessar o OmniRoute diretamente. A chave, quando necessária, existe somente como variável do backend.
 
-O frontend ainda não está publicado. Durante o desenvolvimento na HOMELAB, o navegador usa somente `/api/chat`; o Vite encaminha a requisição diretamente para o bind local estável do backend.
+O navegador usa somente `/api/chat`. Durante o desenvolvimento na HOMELAB, o Vite encaminha a requisição para o bind local estável. Em produção, uma Netlify Function encaminha a mesma rota ao Funnel sem expor a URL do backend na lógica do bundle.
 
 ## Repositório
 
@@ -88,7 +91,37 @@ npm run build
 
 ### Produção do frontend
 
-O frontend ainda não foi publicado no Netlify. O endpoint público estável do backend já foi definido pelo Tailscale Funnel; a próxima fase ainda deve implementar o proxy de produção/Netlify Function, proteção da API e política de CORS. O proxy do Vite existe somente no servidor de desenvolvimento.
+O repositório está preparado para publicação no Netlify, mas o primeiro deploy depende de vincular uma conta Netlify ao GitHub. A CLI não estava instalada/autenticada na HOMELAB durante a Fase 4B, portanto nenhuma URL de frontend foi inventada ou registrada.
+
+A configuração fica no `netlify.toml` da raiz:
+
+- base directory: `frontend`;
+- build command: `npm run build`;
+- publish directory: `dist`;
+- functions directory efetivo: `frontend/netlify/functions`;
+- rewrite de `/api/chat` para a Function `chat`;
+- fallback da SPA para `/index.html`, depois da regra da API.
+
+A Function `frontend/netlify/functions/chat.mjs` aceita somente `POST`, valida JSON e o campo `message`, limita corpo e mensagem, aplica timeout e encaminha exclusivamente para `/api/chat`. O destino vem da variável server-side de runtime:
+
+```dotenv
+BACKEND_BASE_URL=https://nflnba.tail08f125.ts.net:8443
+```
+
+Essa variável deve ser criada no Netlify com escopo de Functions/runtime. Ela não usa prefixo `VITE_` e não entra no bundle. `OMNIROUTE_API_KEY` continua exclusivamente no backend do Coolify.
+
+Testes locais da Function:
+
+```bash
+cd /opt/projeto-digitacao/frontend
+npm run test:function
+```
+
+Para publicar manualmente: no Netlify, escolha **Add new project** e **Import an existing project**, conecte o GitHub, selecione `bastosrafael/projeto-digitacao` e a branch `main`, confirme a configuração detectada pelo `netlify.toml`, adicione `BACKEND_BASE_URL` no escopo de Functions e inicie o deploy. Após a publicação, valide o frontend e `POST https://<site-netlify>/api/chat`.
+
+### Interface aprovada
+
+A interface da Fase 4 está congelada. O commit visual é `fc53ebb`, marcado pela tag anotada `ui-v1-approved`. Consulte `docs/UI_APROVADA.md`. Mudanças de infraestrutura não autorizam alterações em componentes visuais, CSS ou responsividade.
 
 ## Requisitos do backend
 
@@ -209,7 +242,7 @@ OMNIROUTE_MODEL=auto/coding:free
 
 Se o OmniRoute local continuar sem exigir autenticação, `OMNIROUTE_API_KEY` pode permanecer vazia. A chave, quando necessária, deve existir somente como variável protegida do backend.
 
-A imagem `projeto-digitacao-backend:local` também foi construída e validada localmente. Excel e frontend ainda não fazem parte do estado atual.
+A imagem `projeto-digitacao-backend:local` também foi construída e validada localmente. O frontend existe e está preparado para o Netlify; Excel ainda não faz parte do estado atual.
 
 ### Validação do deploy
 

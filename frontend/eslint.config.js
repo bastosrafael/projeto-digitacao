@@ -28,4 +28,18 @@ export default defineConfig([
       globals: globals.node,
     },
   },
+  {
+    files: ['netlify/**/*.mjs', 'tests/**/*.mjs'],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      globals: {
+        ...globals.node,
+        ...globals.browser,
+      },
+      parserOptions: {
+        sourceType: 'module',
+      },
+    },
+  },
 ])

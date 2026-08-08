@@ -531,6 +531,95 @@ sudo docker rm projeto-digitacao-backend-test
 - [ ] Considerar a Fase 3D pública concluída.
 - [ ] Iniciar Fase 4B/Netlify.
 
+## Fase 4B — preparação do frontend para Netlify (2026-08-08)
+
+### Estado inicial
+
+- Repositório em `main`, commit inicial `5cdfcea`, sincronizado com `origin/main` e working tree limpa.
+- Netlify CLI não estava instalada na HOMELAB; não havia sessão autenticada disponível e não foi feito login, instalação de CLI ou uso de token.
+- Endpoint público estável preservado: `https://nflnba.tail08f125.ts.net:8443`.
+- Tailscale Funnel, Coolify, OmniRoute, portas e serviços existentes não foram alterados.
+
+### Interface aprovada / DESIGN LOCK
+
+- Status: **LOCKED / DO NOT ALTER WITHOUT AUTHORIZATION**.
+- Commit visual de referência: `fc53ebb`.
+- Criado `docs/UI_APROVADA.md` com o escopo visual congelado.
+- Criada a tag anotada `ui-v1-approved`, apontando exatamente para `fc53ebb`, e enviada ao GitHub.
+- Nenhum componente em `frontend/src/components`, `App.jsx`, CSS, layout ou identidade visual foi modificado.
+
+### Preparação Netlify
+
+- Criado `netlify.toml` na raiz do monorepo.
+- Build configurado com base `frontend`, comando `npm run build` e publicação em `dist`.
+- Functions usam o diretório padrão relativo à base: `frontend/netlify/functions`.
+- A regra `/api/chat` é processada antes do fallback SPA para `/index.html`.
+- Criada `frontend/netlify/functions/chat.mjs` usando a API moderna Web `Request`/`Response` do Netlify Functions.
+- O frontend permaneceu chamando somente a URL relativa `/api/chat`; o proxy Vite local continua apontando por padrão para `http://127.0.0.1:18001`.
+
+### Segurança e validações da Function
+
+- Aceita somente `POST`; outros métodos retornam HTTP 405 e header `Allow: POST`.
+- Exige `Content-Type: application/json`, JSON válido e `message` string não vazia.
+- Limites: corpo de 16 KiB e mensagem de 4.000 caracteres.
+- O cliente não escolhe destino; a Function constrói exclusivamente `/api/chat` a partir de `BACKEND_BASE_URL`.
+- Timeout upstream de 25 segundos; timeout, falha de rede, configuração ausente e resposta inválida produzem JSON controlado sem stack trace.
+- `BACKEND_BASE_URL` é variável server-side/runtime. Não foi criada variável `VITE_BACKEND_BASE_URL` e nenhuma chave do OmniRoute foi adicionada ao frontend ou ao bundle.
+- Criada suíte Node em `frontend/tests/netlify-chat.test.mjs` e script `npm run test:function`.
+
+### Testes realizados
+
+- Function: `npm run test:function` — 6 testes passaram, cobrindo POST válido, GET rejeitado, ausência de `message`, JSON inválido, backend indisponível e timeout.
+- Teste real do código da Function com `BACKEND_BASE_URL=https://nflnba.tail08f125.ts.net:8443`: HTTP 200, `{"response":"netlify proxy funcionando"}`.
+- Funnel: `GET /health` — HTTP/2 200, `server: uvicorn`, `{"status":"ok"}`.
+- Desenvolvimento local: Vite em `http://127.0.0.1:5173`; `POST /api/chat` via proxy para `127.0.0.1:18001` — HTTP 200, `{"response":"vite local funcionando"}`.
+- Backend: `.venv/bin/python -m pytest -q` — 3 testes passaram em 0,72 s.
+- Frontend: `npm run lint` — concluído sem erros.
+- Frontend: `npm run build` — concluído com Vite 8.2.1, 20 módulos transformados.
+- O servidor Vite temporário foi encerrado após o teste.
+
+### Problemas e soluções
+
+- Um teste inicial montava incorretamente uma requisição GET com body; o helper de teste foi corrigido e toda a suíte foi repetida com sucesso.
+- Publicação automática indisponível porque a Netlify CLI não está instalada e não há autenticação Netlify confirmada. A preparação técnica foi concluída sem inventar credenciais.
+
+### Publicação pendente
+
+- Repositório: `bastosrafael/projeto-digitacao`, branch `main`.
+- Configuração já versionada: base `frontend`, build `npm run build`, publish `dist` e Functions em `frontend/netlify/functions`.
+- Variável a configurar no Netlify, no escopo Functions/runtime: `BACKEND_BASE_URL=https://nflnba.tail08f125.ts.net:8443`.
+- Depois do primeiro deploy, registrar a URL Netlify e validar o carregamento do frontend e `POST /api/chat` pela URL pública.
+
+### Arquivos criados ou modificados
+
+- `netlify.toml`: build do monorepo e roteamento API/SPA.
+- `frontend/netlify/functions/chat.mjs`: proxy server-side seguro.
+- `frontend/tests/netlify-chat.test.mjs`: testes automatizados da Function.
+- `frontend/package.json`: script `test:function`.
+- `frontend/eslint.config.js`: lint dos arquivos Node `.mjs`.
+- `docs/UI_APROVADA.md`: registro do design lock.
+- `README.md`: arquitetura e instruções Netlify.
+- `memoria.md`: registro desta fase.
+
+### Próximo passo
+
+- Vincular o repositório à conta Netlify pela interface, configurar `BACKEND_BASE_URL`, executar o primeiro deploy e validar frontend/chat públicos. Não iniciar Excel antes dessa validação.
+
+### Checklist da Fase 4B
+
+- [x] Ler memória, README e estado Git antes de alterar.
+- [x] Preservar integralmente a interface aprovada.
+- [x] Documentar o design lock.
+- [x] Criar e publicar a tag `ui-v1-approved` em `fc53ebb`.
+- [x] Criar configuração Netlify para o monorepo.
+- [x] Criar Function server-side para `/api/chat`.
+- [x] Implementar validação, limites, timeout e erros controlados.
+- [x] Preservar o proxy Vite local para `127.0.0.1:18001`.
+- [x] Validar a Function localmente e contra o Funnel real.
+- [x] Executar lint, build e testes backend.
+- [ ] Publicar no Netlify e validar a URL pública (bloqueado apenas por autenticação/conta Netlify).
+- [ ] Iniciar Fase 5/Excel.
+
 ## 2026-08-08 — Fase 3E: Tailscale Funnel
 
 ### Resultado
