@@ -249,6 +249,8 @@ Limitações deliberadas desta fase:
 - a Fase 5A não persistia o filename original em banco/sidecar; os dois uploads existentes foram relacionados por logs, tamanho, horário e estrutura interna;
 - não há pesquisa web, chamada ao OmniRoute, descrição comercial ou descrição DUIMP.
 
+**FASE 5B = CONCLUÍDA.** O commit funcional `2a60c14` foi implantado no Coolify pelo deployment `qmhtkfjr44k2gdzhxg520vxt`. O novo container ficou healthy, preservou o mount RW e os dois uploads reais retornaram HTTP 200 no endpoint de análise local e público. A Fase 5A e a UI aprovada continuam preservadas. A Fase 6 não foi iniciada.
+
 ## Requisitos do backend
 
 - Python 3.12+

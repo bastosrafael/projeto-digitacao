@@ -1114,5 +1114,12 @@ Internet
 - Fórmulas dependem do valor cached no XLSX. Workbooks sem tabela reconhecível retornam erro controlado.
 - UI permaneceu LOCKED e nenhum arquivo frontend/CSS foi alterado.
 - Arquivos XLSX reais e imagens extraídas permanecem fora do Git por `.gitignore`.
-- Estado antes do deploy: implementação e casos reais validados localmente; conclusão da Fase 5B depende ainda de commit/push, redeploy seguro e dois POSTs HTTP 200 em produção.
+- Commit funcional `2a60c14` (`feat: adiciona leitor universal de packing list`) criado e publicado em `origin/main` por push normal, sem force push.
+- Auto Deploy não iniciou. Redeploy manual seguro `qmhtkfjr44k2gdzhxg520vxt` foi concluído no commit `2a60c14316d5d7d0f6c53cba772a640dbdbc726d`, sem force rebuild.
+- Novo container `6d3b34f4199b` confirmado `running/healthy`, com port mapping `127.0.0.1:18001:8000` e bind RW `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`.
+- Fase 5A revalidada: `/health` local/público HTTP 200, `/api/uploads/config` com 200 MB, variáveis corretas e os dois arquivos persistentes presentes no host/container.
+- Produção IM0416-26: POST local e público HTTP 200; 71 produtos únicos, 88 imagens, zero warnings/reviews e sem path/Base64 na resposta.
+- Produção IM0342-26 com FOB: POST local e público HTTP 200; 74 produtos únicos, 155 imagens, zero warnings/reviews e sem path/Base64 na resposta.
+- Netlify respondeu HTTP 200; nenhum frontend/CSS foi alterado. Funnel preservou 443 -> NFLNBA e 8443 -> Projeto Digitação.
+- **FASE 5B = CONCLUÍDA.** Todos os 25 critérios de sucesso foram atendidos.
 - A Fase 6 não foi iniciada.
