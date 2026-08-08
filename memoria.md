@@ -96,3 +96,97 @@ curl -X POST http://127.0.0.1:18000/api/chat \
 - [x] Validar chamada real FastAPI -> OmniRoute -> modelo.
 - [x] Atualizar README e resultado final desta etapa na memória.
 - [x] Criar commit Git (`feat: implementa backend e integracao com OmniRoute`).
+
+## 2026-08-08 — Fase 3: container e preparação para Coolify
+
+### Resultado
+
+- Fase 3 concluída e validada.
+- Imagem criada: `projeto-digitacao-backend:local`.
+- ID da imagem: `sha256:f0a813e63451dab9d45a8724c175675961bc7a3cc8a894cf182b0065a668d7db`.
+- Tamanho da imagem: `docker image inspect` informou 59.834.790 bytes; `docker image ls` exibiu 253 MB de tamanho local/descompactado.
+- Container temporário: `projeto-digitacao-backend-test`.
+- Mapeamento usado: `127.0.0.1:18001 -> container:8000`.
+- O container foi parado e removido ao final; a imagem local foi mantida.
+- Nenhum container, volume, rede, proxy, túnel, configuração do Coolify ou instalação do OmniRoute foi alterado.
+
+### Revisão do Dockerfile
+
+- Mantida a imagem enxuta `python:3.12-slim`.
+- Confirmadas a instalação por `requirements.txt`, a cópia somente de `app/`, a inicialização por Uvicorn e a escuta em `0.0.0.0:8000`.
+- Confirmado o `HEALTHCHECK` interno em `http://127.0.0.1:8000/health`.
+- O `Dockerfile` não precisou ser alterado.
+- Criado `backend/.dockerignore` para excluir `.env`, ambiente virtual, caches, testes e metadados do contexto. O contexto enviado no build caiu de aproximadamente 70 MB para 16,65 KB.
+
+### Comandos importantes
+
+```bash
+cd /opt/projeto-digitacao/backend
+sudo docker build -t projeto-digitacao-backend:local .
+sudo docker run -d --name projeto-digitacao-backend-test \
+  -p 127.0.0.1:18001:8000 \
+  -e OMNIROUTE_BASE_URL=http://192.168.15.112:20128/v1 \
+  -e OMNIROUTE_API_KEY= \
+  -e OMNIROUTE_MODEL=auto/coding:free \
+  projeto-digitacao-backend:local
+curl http://127.0.0.1:18001/health
+curl -X POST http://127.0.0.1:18001/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Responda apenas: docker funcionando"}'
+.venv/bin/python -m pytest -q
+sudo docker logs projeto-digitacao-backend-test
+sudo docker stop projeto-digitacao-backend-test
+sudo docker rm projeto-digitacao-backend-test
+```
+
+### Testes e evidências
+
+- Build Docker: concluído sem erro.
+- Estado durante o teste: `running`, healthcheck Docker `healthy`.
+- Bind confirmado: apenas `127.0.0.1:18001`, direcionado a `8000/tcp` no container.
+- `GET /health`: HTTP 200, `{"status":"ok"}`.
+- `POST /api/chat`: HTTP 200, `{"response":"docker funcionando"}`.
+- Acesso do container ao OmniRoute confirmado: requisição para `http://192.168.15.112:20128/v1/chat/completions` retornou HTTP 200 usando `auto/coding:free`.
+- Testes automatizados: `3 passed in 0.88s`.
+- Logs: Uvicorn iniciou em `0.0.0.0:8000`; health, chat e OmniRoute retornaram HTTP 200; nenhum erro crítico e nenhuma chave de API apareceram.
+
+### Problemas encontrados e soluções
+
+- Problema: o usuário da sessão não tinha acesso direto ao socket `/var/run/docker.sock`.
+- Solução: executar somente os comandos Docker necessários com `sudo`, sem mudar grupos ou permissões do daemon.
+- Problema: o isolamento de rede da ferramenta não permitiu consultar sockets nem acessar `127.0.0.1:18001`.
+- Solução: repetir somente as inspeções e chamadas localhost necessárias fora do isolamento.
+- Problema: o diretório `backend/` ocupava aproximadamente 70 MB por incluir `.venv` no contexto potencial.
+- Solução: criar `.dockerignore`; o contexto efetivo do build ficou em 16,65 KB.
+- Observação: o `pip` exibiu no build um aviso esperado sobre instalação como root dentro da imagem, sem falha ou impacto no host.
+
+### Preparação para Coolify
+
+- Documentado no `README.md`: contexto `backend/`, Dockerfile `backend/Dockerfile`, porta interna 8000, proxy do Coolify para essa porta, health check `/health` e variáveis de ambiente.
+- Nenhum deploy, chamada administrativa, aplicação, domínio, proxy ou túnel foi criado ou alterado.
+
+### Arquivos criados ou modificados
+
+- Criado: `backend/.dockerignore`.
+- Modificado: `README.md`.
+- Modificado: `memoria.md`.
+
+### Próximo passo
+
+- Aguardar validação da Fase 3. Depois, iniciar a Fase 4 para criar o frontend mínimo React + Vite e conectá-lo somente ao backend. Não fazer deploy no Coolify antes de configuração e autorização explícitas.
+
+### Checklist da Fase 3
+
+- [x] Ler memória, README e backend integralmente antes de alterar arquivos.
+- [x] Revisar o Dockerfile mantendo a porta interna 8000.
+- [x] Confirmar que a porta 18001 estava livre.
+- [x] Construir `projeto-digitacao-backend:local` sem erro.
+- [x] Testar o container em `127.0.0.1:18001`.
+- [x] Validar `/health`.
+- [x] Validar `/api/chat` e o acesso real ao OmniRoute.
+- [x] Revisar logs e confirmar ausência de chave exposta.
+- [x] Executar os testes automatizados.
+- [x] Parar e remover somente o container temporário.
+- [x] Documentar a futura configuração do Coolify sem realizar deploy.
+- [x] Atualizar README e memória.
+- [x] Verificar Git e criar commit da Fase 3 (`feat: valida backend em container docker`).

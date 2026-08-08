@@ -1,6 +1,6 @@
 # Projeto Digitação
 
-Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O estado atual implementa somente o backend das fases 1 e 2: health check e chat por meio do OmniRoute local.
+Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O estado atual implementa o backend das fases 1 a 3: health check, chat por meio do OmniRoute local e execução validada em container Docker.
 
 ## Requisitos
 
@@ -54,10 +54,52 @@ Na máquina homelab, a porta 8000 do host já está ocupada pelo Coolify. Por is
 
 ## Docker
 
+Construa a imagem a partir do diretório do backend:
+
 ```bash
 cd /opt/projeto-digitacao/backend
-docker build -t projeto-digitacao-backend .
-docker run --rm -p 8000:8000 --env-file .env projeto-digitacao-backend
+docker build -t projeto-digitacao-backend:local .
 ```
 
-A construção e execução em container pertencem à fase 3 e ainda não foram executadas. Excel, frontend e deploy também não fazem parte do estado atual.
+Para um teste local, confirme primeiro que a porta 18001 está livre e publique somente em localhost:
+
+```bash
+docker run --name projeto-digitacao-backend-test \
+  -p 127.0.0.1:18001:8000 \
+  -e OMNIROUTE_BASE_URL=http://192.168.15.112:20128/v1 \
+  -e OMNIROUTE_API_KEY= \
+  -e OMNIROUTE_MODEL=auto/coding:free \
+  projeto-digitacao-backend:local
+```
+
+A aplicação continua ouvindo em `0.0.0.0:8000` dentro do container. A porta 18001 é apenas o bind local de teste; a porta 8000 do host não deve ser publicada porque já está ocupada por um serviço existente.
+
+Depois do teste, remova somente o container temporário:
+
+```bash
+docker stop projeto-digitacao-backend-test
+docker rm projeto-digitacao-backend-test
+```
+
+## Preparação para Coolify
+
+O deploy ainda não foi realizado. Para uma configuração futura no Coolify:
+
+- use `backend/` como contexto de build e `backend/Dockerfile` como Dockerfile;
+- configure a porta interna da aplicação como `8000`;
+- não publique a porta 8000 diretamente no host;
+- deixe o proxy/reverse proxy do Coolify encaminhar o domínio para a porta interna 8000 do container;
+- configure o health check HTTP com o caminho `/health`;
+- não altere o comando de inicialização da imagem, salvo necessidade comprovada.
+
+Configure as seguintes variáveis no painel do Coolify, sem colocá-las no repositório:
+
+```dotenv
+OMNIROUTE_BASE_URL=http://192.168.15.112:20128/v1
+OMNIROUTE_API_KEY=<segredo-configurado-no-coolify>
+OMNIROUTE_MODEL=auto/coding:free
+```
+
+Se o OmniRoute local continuar sem exigir autenticação, `OMNIROUTE_API_KEY` pode permanecer vazia. A chave, quando necessária, deve existir somente como variável protegida do backend.
+
+A imagem `projeto-digitacao-backend:local` foi construída e validada com `/health` e `/api/chat`. Excel, frontend e deploy não fazem parte do estado atual.
