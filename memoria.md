@@ -1050,3 +1050,69 @@ Internet
 - [x] Remover somente `localtunnel-projeto-digitacao` depois das validações.
 - [x] Preservar UI, desenvolvimento local, imagens, volumes e redes.
 - [ ] Iniciar Fase 4B/Netlify.
+
+## 2026-08-08 — Fase 5B: leitor universal de Packing List
+
+### Identificação segura dos uploads reais
+
+- A Fase 5A não persistia metadados de filename em banco ou sidecar; o nome original existia somente na resposta HTTP do upload.
+- Foram encontrados quatro XLSX no mount. Dois tinham 1002 bytes e correspondem aos testes sintéticos registrados na conclusão da Fase 5A.
+- Os dois uploads novos foram relacionados usando logs do backend (`file_id`, bytes e horário), stat do mount e inspeção estrutural interna do workbook, sem depender somente de mtime.
+- `IM0416-26 - PACKING LIST.xlsx`: `file_id=fe9759e7-be2c-4808-92ae-cf395e9bd376`, 36.236.835 bytes, upload em 2026-08-08 20:01:36 -03, arquivo controlado `/data/uploads/fe9759e7-be2c-4808-92ae-cf395e9bd376.xlsx`.
+- `IM0342-26 - PACKING LIST com fob.xlsx`: `file_id=c21b5d16-d31f-4722-8c3b-213d19360be3`, 1.751.445 bytes, upload em 2026-08-08 20:00:09 -03, arquivo controlado `/data/uploads/c21b5d16-d31f-4722-8c3b-213d19360be3.xlsx`.
+- A associação foi confirmada também pelo conteúdo: o primeiro é bilíngue e contém `Picture`, `Item name`, `NCM`, `Style number`, `Ingredients`; o segundo contém `图片`, `款号`, `品名`, `织造方式`, `成份`, `洗水唛`, `吊牌` e USD.
+
+### Implementação determinística
+
+- Criado `backend/app/services/spreadsheets/` com módulos separados: `parser`, `detector`, `images`, `normalization`, `schemas` e `analyzer`.
+- O parser lê OOXML diretamente e fecha ZIP/streams por context manager. Não carrega imagens em Base64 nem inclui bytes na resposta.
+- Cabeçalhos são pontuados em qualquer linha e podem ocupar até três linhas. Abas são comparadas por score de cabeçalho, volume de dados e imagens.
+- Code/style usa aliases em português, inglês e chinês. Quando não há título conhecido, a coluna é inferida pela natureza dos valores, com penalização de números, quantidade e NCM.
+- Células mescladas são resolvidas pelo valor top-left. Linhas logísticas sem código só herdam o anterior quando nome/NCM confirmam o mesmo bloco documental.
+- `original_values` preserva valores brutos. Texto de caixa é separado em `packing_info`; sufixos chineses semânticos que distinguem itens são preservados no código.
+- Produtos repetidos são agrupados por código normalizado e mantêm todos os `row_numbers`.
+- Ausência real de código gera `ROW-xxxxx`, `REVISAR` e `Código não identificado`; nenhum código é inventado.
+- Drawings são lidos pelas relações OOXML. Cada âncora registra sheet, row, column, width, height, media reference, SHA-256, classificação e código relacionado.
+- Classificação estrutural: coluna de Picture/图片 -> `PRODUCT_IMAGE`; wash label/洗水唛 -> `WASH_LABEL`; hangtag/吊牌 -> `HANGTAG`; label -> `LABEL_IMAGE`; desconhecida -> `OTHER`.
+- Associação imagem↔produto considera linha lógica, merges, continuidade documental e proximidade limitada, sem depender cegamente da mesma linha.
+- Endpoint criado: `POST /api/uploads/{file_id}/analyze`. UUID é validado e somente `<UPLOAD_DIR>/<UUID>.xlsx` pode ser aberto. O trabalho pesado roda em threadpool.
+- Não houve chamada ao OmniRoute, pesquisa na internet, análise visual por IA, descrição comercial ou descrição DUIMP.
+
+### Testes sintéticos
+
+- 24 testes backend passaram na validação local, preservando todos os testes da Fase 5A.
+- Cobertura nova: `Style number`, `Code`, `款号`, header fora da linha 1, header multilinha, inferência por valores, ausência de código, repetidos, texto logístico, sufixo chinês semântico, múltiplas abas, merges, imagens, imagem sem código, NCM, composição, wash label, hangtag, label, UUID inválido, upload inexistente e tentativa de path arbitrário.
+- Respostas verificadas sem Base64, sem bytes de imagem e sem path absoluto.
+
+### Métricas locais — IM0416-26
+
+- `file_id=fe9759e7-be2c-4808-92ae-cf395e9bd376`.
+- 1 sheet; principal `总合计567箱`; 169 linhas; 16 colunas; cabeçalho na linha 1.
+- Code/style na coluna 5, header `款号 Style number`, confiança 0,99.
+- 118 linhas com código explícito; 71 códigos/produtos únicos; 53 códigos repetidos.
+- 88 âncoras; 85 mídias únicas por SHA-256; 64 product images; 16 hangtags; 8 other.
+- Campos auxiliares: item name, NCM, composition, hangtag e packing info.
+- Sem warnings ou produtos `REVISAR` no caso de aceitação.
+- Duração observada ~1,3 s; máximo RSS do processo ~40 MB; JSON ~69 KB.
+
+### Métricas locais — IM0342-26 com FOB
+
+- `file_id=c21b5d16-d31f-4722-8c3b-213d19360be3`.
+- 3 sheets; principal `Sheet1`; 175 linhas; 23 colunas; cabeçalho principal na linha 1 e cabeçalhos repetidos em seções posteriores; 199 merges no workbook.
+- Code/style na coluna 2, header `款号`, confiança 0,99.
+- 137 linhas com código explícito; 74 códigos/produtos únicos; 53 códigos repetidos.
+- 155 âncoras; 98 mídias únicas por SHA-256; 109 product images; 36 wash labels; 10 hangtags.
+- Campos auxiliares: item name, NCM, composition, construction, manufacturer, wash label, hangtag e packing info.
+- Sem warnings ou produtos `REVISAR` no caso de aceitação.
+- Duração observada ~2,2 s; máximo RSS do processo ~36 MB; JSON ~94 KB.
+
+### Comparação e limitações
+
+- IM0416-26 é bilíngue, tem uma aba e separa hangtag/foto; IM0342-26 usa três abas, texto chinês, merges, headers repetidos e colunas específicas para wash label/hangtag.
+- Uma mídia pode ser reutilizada em várias âncoras; por isso `images_detected` conta instâncias e `unique_media` usa SHA-256.
+- Classificação permanece estrutural. Não há OCR/visão; colunas desconhecidas ficam `OTHER`.
+- Fórmulas dependem do valor cached no XLSX. Workbooks sem tabela reconhecível retornam erro controlado.
+- UI permaneceu LOCKED e nenhum arquivo frontend/CSS foi alterado.
+- Arquivos XLSX reais e imagens extraídas permanecem fora do Git por `.gitignore`.
+- Estado antes do deploy: implementação e casos reais validados localmente; conclusão da Fase 5B depende ainda de commit/push, redeploy seguro e dois POSTs HTTP 200 em produção.
+- A Fase 6 não foi iniciada.

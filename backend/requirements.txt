@@ -2,7 +2,9 @@ fastapi==0.115.14
 httpx==0.28.1
 pydantic-settings==2.10.1
 python-multipart==0.0.32
+Pillow==11.3.0
 uvicorn[standard]==0.35.0
 
 # Testes
 pytest==8.4.1
+openpyxl==3.1.5

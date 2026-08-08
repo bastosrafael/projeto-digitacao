@@ -1,8 +1,14 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.config import Settings, get_settings
 from app.services.upload_service import UploadSizeError, UploadValidationError, store_upload
+from app.services.spreadsheets import analyze_workbook
+from app.services.spreadsheets.parser import SpreadsheetParseError
+from app.services.spreadsheets.schemas import AnalysisResponse
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -57,3 +63,21 @@ async def upload_spreadsheet(
         size_bytes=stored.size_bytes,
         status="uploaded",
     )
+
+
+@router.post("/{file_id}/analyze", response_model=AnalysisResponse)
+async def analyze_spreadsheet(
+    file_id: UUID,
+    settings: Settings = Depends(get_settings),
+) -> AnalysisResponse:
+    controlled_file_id = str(file_id)
+    path = settings.upload_dir / f"{controlled_file_id}.xlsx"
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload não encontrado.")
+    try:
+        return await run_in_threadpool(analyze_workbook, path, controlled_file_id)
+    except SpreadsheetParseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc

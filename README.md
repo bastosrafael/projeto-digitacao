@@ -191,6 +191,64 @@ O build do Netlify define `VITE_UPLOAD_API_BASE_URL=https://nflnba.tail08f125.ts
 
 **FASE 5A = CONCLUÍDA.** Backend, storage persistente, endpoints local/público, upload real e frontend Netlify foram validados. A interface visual aprovada foi preservada. A leitura ou análise do conteúdo da planilha permanece fora desta fase e deve começar somente na Fase 5B.
 
+## Leitor universal de Packing List — Fase 5B
+
+O backend analisa um upload existente pelo identificador controlado:
+
+```http
+POST /api/uploads/{file_id}/analyze
+```
+
+`file_id` precisa ser UUID válido. O backend resolve exclusivamente `<UPLOAD_DIR>/<UUID>.xlsx`; a API não aceita caminhos e não devolve paths absolutos, bytes de imagem ou Base64. O parsing síncrono é executado em threadpool para não bloquear o event loop do FastAPI.
+
+### Arquitetura do parser
+
+Os módulos ficam em `backend/app/services/spreadsheets/`:
+
+- `parser.py`: leitura OOXML determinística de workbook, worksheets, strings, células, merges e relações de drawings;
+- `detector.py`: pontuação de abas e cabeçalhos, suporte a cabeçalho fora da linha 1/multilinha, aliases multilíngues e inferência de code/style pelos valores;
+- `images.py`: leitura das âncoras, dimensões, referência interna, SHA-256, classificação estrutural e reutilização de mídia;
+- `normalization.py`: aliases em português, inglês e chinês, normalização de cabeçalhos/códigos e separação de texto logístico;
+- `schemas.py`: contratos normalizados de análise, produtos e imagens;
+- `analyzer.py`: escolha da aba principal, extração, agrupamento, associação imagem↔linha↔código e métricas.
+
+A detecção de code/style reconhece títulos como `Style number`, `Code`, `Código`, `SKU`, `Model`, `款号` e `货号`. Sem título conhecido, pontua colunas por proporção e diversidade de valores compatíveis com códigos, rejeitando números sequenciais, quantidades e padrões de NCM. A resposta inclui confiança de 0 a 1.
+
+Códigos repetidos são agrupados em um produto lógico com `row_numbers`. O valor original permanece em `code_original`/`original_values`; intervalos de caixas são separados em `packing_info`. Sufixos semânticos que distinguem um item, inclusive texto chinês não logístico, são preservados. Quando não há código identificável, o parser usa `ROW-xxxxx`, `status=REVISAR` e o warning `Código não identificado`.
+
+As imagens são contadas por âncora, não apenas por arquivo em `xl/media`, porque uma mesma mídia pode aparecer várias vezes. Cada instância registra aba, linha/coluna de âncora, dimensões, referência OOXML e SHA-256. A coluna/cabeçalho classifica `PRODUCT_IMAGE`, `LABEL_IMAGE`, `WASH_LABEL`, `HANGTAG` ou `OTHER`; a associação ao produto usa linha lógica, merges, continuidade documental e proximidade controlada.
+
+### Casos reais de aceitação
+
+| Métrica | IM0416-26 | IM0342-26 com FOB |
+|---|---:|---:|
+| `file_id` | `fe9759e7-be2c-4808-92ae-cf395e9bd376` | `c21b5d16-d31f-4722-8c3b-213d19360be3` |
+| Abas | 1 | 3 |
+| Aba principal | `总合计567箱` | `Sheet1` |
+| Linhas × colunas | 169 × 16 | 175 × 23 |
+| Cabeçalho | linha 1 | linha 1, repetido em outras seções |
+| Code/style | coluna 5, `款号 Style number` | coluna 2, `款号` |
+| Confiança | 0,99 | 0,99 |
+| Âncoras de imagem | 88 | 155 |
+| Imagens de produto | 64 | 109 |
+| Hangtags | 16 | 10 |
+| Wash labels | 0 | 36 |
+| Other | 8 | 0 |
+| Códigos únicos | 71 | 74 |
+| Códigos repetidos | 53 | 53 |
+| Duração observada | ~1,3 s | ~2,2 s |
+
+O modelo IM0416-26 é bilíngue, usa cabeçalhos como `Picture`, `Item name`, `NCM`, `Style number` e `Ingredients`, e separa hangtag/foto em colunas próprias. O modelo IM0342-26 é predominantemente chinês, contém merges, cabeçalhos repetidos e colunas estruturais para `图片`, `款号`, `品名`, `织造方式`, `成份`, `洗水唛` e `吊牌`. O mesmo código e as mesmas regras analisam ambos; não existe condição por filename.
+
+Limitações deliberadas desta fase:
+
+- classificação de imagem é estrutural; não há OCR nem IA visual;
+- imagens em colunas desconhecidas ficam como `OTHER`;
+- fórmulas usam o valor cached existente no XLSX;
+- arquivos corrompidos ou sem tabela reconhecível retornam erro controlado;
+- a Fase 5A não persistia o filename original em banco/sidecar; os dois uploads existentes foram relacionados por logs, tamanho, horário e estrutura interna;
+- não há pesquisa web, chamada ao OmniRoute, descrição comercial ou descrição DUIMP.
+
 ## Requisitos do backend
 
 - Python 3.12+
