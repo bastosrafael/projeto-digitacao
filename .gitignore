@@ -6,10 +6,12 @@ __pycache__/
 venv/
 .coverage
 htmlcov/
+node_modules/
+dist/
+*.local
 data/uploads/*
 data/outputs/*
 data/temp/*
 !data/uploads/.gitkeep
 !data/outputs/.gitkeep
 !data/temp/.gitkeep
-

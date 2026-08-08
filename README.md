@@ -5,7 +5,13 @@ Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de p
 ## Arquitetura atual
 
 ```text
-Internet
+Navegador local
+  -> React + Vite em :5173
+  -> POST relativo /api/chat
+  -> proxy de desenvolvimento do Vite
+  -> HTTPS LocalTunnel
+
+Internet / proxy Vite
   -> HTTPS LocalTunnel (projeto-digitacao-api.loca.lt)
   -> container localtunnel-projeto-digitacao (rede Docker coolify)
   -> FastAPI no Coolify (porta interna 8000)
@@ -16,13 +22,75 @@ Internet
 
 O navegador nunca deve acessar o OmniRoute diretamente. A chave, quando necessária, existe somente como variável do backend.
 
+O frontend ainda não está publicado. Durante o desenvolvimento, o navegador usa somente `/api/chat`; o Vite encaminha a requisição para o backend e adiciona o header necessário do LocalTunnel.
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
 - Branch principal: `main`
 - Diretório do backend: `/backend`
+- Diretório do frontend: `/frontend`
 
-## Requisitos
+## Frontend React + Vite
+
+O frontend da Fase 4 é uma interface responsiva de chat feita com React 19 e Vite 8. Ele oferece mensagens de usuário e assistente, loading, erros amigáveis, envio com Enter, quebra de linha com Shift+Enter, limpeza da conversa, scroll automático e histórico no `localStorage` do navegador.
+
+O botão de anexo é apenas visual nesta fase e informa que o upload de planilha será habilitado posteriormente.
+
+### Instalação
+
+Use Node.js compatível com Vite 8. O ambiente validado utiliza Node `22.23.2` e npm `12.0.2`.
+
+```bash
+cd /opt/projeto-digitacao/frontend
+npm install
+```
+
+### Proxy de desenvolvimento
+
+Copie o arquivo de exemplo somente se precisar alterar o destino padrão:
+
+```bash
+cd /opt/projeto-digitacao/frontend
+cp .env.example .env
+```
+
+Variável disponível:
+
+```dotenv
+VITE_DEV_PROXY_TARGET=https://projeto-digitacao-api.loca.lt
+```
+
+Essa URL não é secret. O arquivo `.env` local não é versionado. Nenhuma variável ou chave do OmniRoute deve ser adicionada ao frontend.
+
+O serviço de API em `src/services/api.js` chama apenas `POST /api/chat`. Em desenvolvimento, `vite.config.js` encaminha `/api` para `VITE_DEV_PROXY_TARGET` e adiciona `bypass-tunnel-reminder: true`.
+
+### Executar e validar
+
+```bash
+cd /opt/projeto-digitacao/frontend
+npm run dev -- --host 0.0.0.0
+```
+
+Endereços validados na homelab:
+
+- local: `http://127.0.0.1:5173/`;
+- LAN: `http://192.168.15.112:5173/`.
+
+Qualidade e build de produção:
+
+```bash
+npm run lint
+npm run build
+```
+
+`dist/` e `node_modules/` são artefatos locais ignorados pelo Git.
+
+### Produção do frontend
+
+O frontend ainda não foi publicado no Netlify. Antes disso, devem ser definidos o domínio do frontend, CORS restrito ou um proxy de produção, proteção da API e a estratégia para o LocalTunnel. O proxy do Vite existe somente no servidor de desenvolvimento.
+
+## Requisitos do backend
 
 - Python 3.12+
 - Acesso de rede ao OmniRoute em `192.168.15.112:20128`

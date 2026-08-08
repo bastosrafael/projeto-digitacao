@@ -348,3 +348,99 @@ sudo docker rm projeto-digitacao-backend-test
 - [x] Executar testes automatizados.
 - [x] Atualizar README e memória.
 - [x] Auditar secrets, criar commit e fazer push (`docs: registra deploy e acesso externo`).
+
+## 2026-08-08 — Fase 4: frontend mínimo de chat
+
+### Resultado
+
+- Fase 4 concluída sem alterar backend, Coolify, OmniRoute, redes Docker ou containers LocalTunnel.
+- Frontend criado em `/opt/projeto-digitacao/frontend` com React `19.2.8`, Vite `8.2.1` e JavaScript.
+- Node existente mantido: `v22.23.2`; npm: `12.0.2`. Nenhuma segunda instalação de Node foi realizada.
+- Nenhum repositório Git adicional foi criado dentro de `frontend/`.
+
+### Estrutura criada
+
+- `frontend/index.html`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- `frontend/.env.example`
+- `frontend/vite.config.js`
+- `frontend/eslint.config.js`
+- `frontend/src/main.jsx`
+- `frontend/src/App.jsx`
+- `frontend/src/styles.css`
+- `frontend/src/components/Header.jsx`
+- `frontend/src/components/ChatMessage.jsx`
+- `frontend/src/components/ChatInput.jsx`
+- `frontend/src/services/api.js`
+
+### Interface e funcionalidades
+
+- Interface autoral, responsiva, sem branding de terceiros e sem dependências visuais pesadas.
+- Mensagem inicial, mensagens do usuário/assistente, timestamps, indicador de resposta e erro amigável.
+- Textarea expansível: Enter envia; Shift+Enter cria nova linha.
+- Envio duplicado bloqueado durante a resposta.
+- Scroll automático, limpeza da conversa e persistência no `localStorage`.
+- Botão visual de anexo exibe aviso; upload real não foi implementado.
+- Nenhum streaming, SSE ou WebSocket foi adicionado.
+
+### API e proxy Vite
+
+- `src/services/api.js` centraliza `sendMessage(message)` e usa somente a URL relativa `POST /api/chat`.
+- Timeout no cliente: 90 segundos; resposta validada antes de ser exibida.
+- `vite.config.js` usa `VITE_DEV_PROXY_TARGET`, com padrão `https://projeto-digitacao-api.loca.lt`.
+- O proxy adiciona `bypass-tunnel-reminder: true` e evita CORS no desenvolvimento local.
+- `frontend/.env.example` contém somente `VITE_DEV_PROXY_TARGET`; nenhuma chave ou variável do OmniRoute existe no frontend.
+
+### Testes e resultados
+
+- `npm install`: 132 pacotes adicionados, 133 auditados e 0 vulnerabilidades reportadas.
+- `npm run lint`: concluído sem erros na execução final.
+- `npm run build`: concluído com Vite 8.2.1; 20 módulos transformados em 719 ms na execução final.
+- Bundle final observado: HTML 0,58 kB; CSS 9,11 kB; JavaScript 198,30 kB (62,68 kB gzip).
+- Vite executado temporariamente com `npm run dev -- --host 0.0.0.0`.
+- Página validada em `http://127.0.0.1:5173/`: HTTP 200, título `Assistente de Produtos`.
+- Teste real único via proxy: `POST http://127.0.0.1:5173/api/chat` com `Responda apenas: frontend funcionando` retornou HTTP 200 e `{"response":"frontend funcionando"}`.
+- Fluxo confirmado: cliente/Vite -> `/api/chat` -> proxy Vite -> HTTPS LocalTunnel -> FastAPI Coolify -> OmniRoute -> `auto/coding:free` -> resposta.
+- O servidor Vite temporário foi encerrado depois dos testes.
+
+### Segurança
+
+- `.gitignore` ampliado para ignorar `node_modules/`, `dist/` e arquivos `*.local`.
+- `frontend/node_modules/`, `frontend/dist/` e `frontend/.env` confirmados como ignorados.
+- Busca no código e bundle confirmou ausência de `OMNIROUTE_API_KEY`, `OMNIROUTE_BASE_URL`, tokens GitHub e padrões de chaves.
+- O termo genérico `password` aparece duas vezes no runtime de dependências empacotado, mas não existe valor, variável ou credencial correspondente no código-fonte.
+- A URL externa não está espalhada em componentes nem no bundle; fica somente no proxy de desenvolvimento e no exemplo de ambiente.
+
+### Problemas encontrados e soluções
+
+- Problema: o primeiro `npm install` ficou bloqueado pelo isolamento de rede.
+- Solução: interromper a tentativa e autorizar somente o download das dependências declaradas.
+- Problema: ESLint 10 exige `defineConfig` para compor configurações com `extends`.
+- Solução: usar `defineConfig`/`globalIgnores` e declarar separadamente globals Node para arquivos `*.config.js`.
+- Problema: `crypto.randomUUID()` não estava disponível no navegador ao abrir o Vite pelo IP em HTTP, causando falha na montagem do React.
+- Solução: criar `createMessageId()` com `crypto.randomUUID()` quando disponível e fallback local não sensível; depois disso lint/build e serviço dos módulos passaram sem novos erros.
+
+### Arquivos modificados fora do frontend
+
+- `.gitignore`: ignores de artefatos Node/Vite.
+- `README.md`: arquitetura e instruções do frontend/proxy.
+- `memoria.md`: registro da Fase 4.
+
+### Próximo passo
+
+- Antes de publicar no Netlify, definir a arquitetura segura de produção: domínio do frontend, CORS restrito ou proxy, proteção da API e estabilidade do destino LocalTunnel. Depois, iniciar a etapa de upload `.xlsx`; não implementar upload antes da validação desta fase.
+
+### Checklist da Fase 4
+
+- [x] Ler memória, README, Git e estrutura antes de modificar arquivos.
+- [x] Verificar Node/npm existentes.
+- [x] Criar React + Vite em JavaScript sem Git aninhado.
+- [x] Implementar interface responsiva e funcionalidades do chat.
+- [x] Centralizar API e configurar proxy Vite.
+- [x] Criar `.env.example` sem secrets.
+- [x] Executar `npm install`, lint e build.
+- [x] Validar um teste real pelo proxy Vite.
+- [x] Auditar bundle, ignores e secrets.
+- [x] Atualizar README e memória.
+- [x] Revisar Git, criar commit e fazer push (`feat: implementa frontend inicial de chat`).
