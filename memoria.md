@@ -1123,3 +1123,33 @@ Internet
 - Netlify respondeu HTTP 200; nenhum frontend/CSS foi alterado. Funnel preservou 443 -> NFLNBA e 8443 -> Projeto Digitação.
 - **FASE 5B = CONCLUÍDA.** Todos os 25 critérios de sucesso foram atendidos.
 - A Fase 6 não foi iniciada.
+
+## 2026-08-08 — Checkpoint final do dia antes da Fase 6
+
+### Estado encerrado
+
+- **FASE 5A = CONCLUÍDA.** Upload XLSX e storage persistente continuam funcionando em produção.
+- **FASE 5B = CONCLUÍDA E VALIDADA EM PRODUÇÃO.** O leitor universal analisou os dois formatos reais com o mesmo parser, sem regra especial por filename.
+- **FASE 6 = NÃO INICIADA.** Nenhuma nova funcionalidade foi iniciada neste checkpoint.
+
+### Casos reais consolidados
+
+- Modelo 1: `IM0416-26 - PACKING LIST.xlsx`, `file_id=fe9759e7-be2c-4808-92ae-cf395e9bd376`, 36.236.835 bytes; 1 aba, principal `总合计567箱`, 169 × 16, code/style na coluna 5 (`款号 / Style number`, confiança 0,99), 88 imagens — 64 `PRODUCT_IMAGE`, 16 `HANGTAG` e 8 `OTHER` —, 71 produtos únicos, 53 códigos repetidos e zero warnings.
+- Modelo 2: `IM0342-26 - PACKING LIST com fob.xlsx`, `file_id=c21b5d16-d31f-4722-8c3b-213d19360be3`, 1.751.445 bytes; 3 abas, principal `Sheet1`, 175 × 23, code/style na coluna 2 (`款号`, confiança 0,99), 155 imagens — 109 `PRODUCT_IMAGE`, 36 `WASH_LABEL` e 10 `HANGTAG` —, 74 produtos únicos, 53 códigos repetidos e zero warnings.
+- Performance observada: aproximadamente 1,3–1,6 s no modelo 1 e 2,1–2,6 s no modelo 2; RSS máximo aproximado de 40 MB e respostas JSON abaixo de 100 KB.
+
+### Validação e preservação
+
+- Backend: 24/24 testes; Netlify Function: 6/6; upload frontend: 3/3; lint e build do frontend aprovados.
+- Coolify healthy, bind `127.0.0.1:18001:8000` e storage RW `/opt/projeto-digitacao/data/uploads` -> `/data/uploads` preservados.
+- Produção preservada em `https://projeto-digitacao.netlify.app` e `https://nflnba.tail08f125.ts.net:8443`; Tailscale Funnel mantém 443 para NFLNBA e 8443 para o Projeto Digitação.
+- UI aprovada e LOCKED no commit visual `fc53ebb`; nenhuma alteração visual está autorizada sem aprovação expressa do operador.
+- Commits da Fase 5B: `2a60c14 feat: adiciona leitor universal de packing list` e `c3d8a45 docs: registra conclusao da fase 5b`; ao encerrar a fase, `main` estava sincronizada com `origin/main` e a working tree estava limpa.
+
+### Próximo passo
+
+- Amanhã, iniciar a **Fase 6 — Pesquisa REAL na internet**, usando no backend uma ferramenta real de busca para cada produto normalizado pela Fase 5B.
+- Fluxo obrigatório: produto estruturado -> busca real no backend -> resultados e URLs reais -> conteúdo relevante -> evidências entregues à IA -> comparação das evidências.
+- A IA não pode afirmar que pesquisou a internet quando nenhuma busca real tiver sido executada. O modelo não é ferramenta de busca.
+- Priorizar fabricante, fornecedor e catálogo oficiais; depois distribuidor e loja especializada/confiável; marketplace somente como evidência secundária. Não inventar URLs, fabricantes ou composição.
+- Roadmap preservado: Fase 7 — análise visual e cruzamento de evidências; Fase 8 — descrição técnica objetiva para DUIMP; Fase 9 — planilha final para download.
