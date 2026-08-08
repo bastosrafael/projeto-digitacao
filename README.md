@@ -1,6 +1,6 @@
 # Projeto Digitação
 
-Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O backend possui health check, chat por meio do OmniRoute local e deploy saudável no Coolify. O acesso local estável está disponível em `127.0.0.1:18001`; o LocalTunnel público ainda não garantiu persistência de subdomínio após reinício.
+Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O backend possui health check, chat por meio do OmniRoute local, deploy saudável no Coolify, acesso local estável em `127.0.0.1:18001` e acesso público HTTPS pelo Tailscale Funnel.
 
 ## Arquitetura atual
 
@@ -11,9 +11,8 @@ Navegador local
   -> proxy de desenvolvimento do Vite
   -> http://127.0.0.1:18001
 
-Internet (temporário)
-  -> HTTPS LocalTunnel (hostname concedido pelo serviço)
-  -> container localtunnel-projeto-digitacao (network_mode host)
+Internet
+  -> HTTPS Tailscale Funnel :8443
   -> http://127.0.0.1:18001
   -> FastAPI no Coolify (porta interna 8000)
   -> OmniRoute na rede local (192.168.15.112:20128)
@@ -62,7 +61,7 @@ Variável disponível:
 VITE_DEV_PROXY_TARGET=http://127.0.0.1:18001
 ```
 
-Essa URL não é secret. O arquivo `.env` local não é versionado. Nenhuma variável ou chave do OmniRoute deve ser adicionada ao frontend. Um destino HTTPS externo pode ser informado temporariamente nessa variável, mas não deve ser tratado como permanente enquanto o LocalTunnel não preservar o subdomínio após reinício.
+Essa URL não é secret. O arquivo `.env` local não é versionado. Nenhuma variável ou chave do OmniRoute deve ser adicionada ao frontend. O desenvolvimento local não precisa passar pelo Funnel público.
 
 O serviço de API em `src/services/api.js` chama apenas `POST /api/chat`. Em desenvolvimento, `vite.config.js` encaminha `/api` para `VITE_DEV_PROXY_TARGET` e adiciona `bypass-tunnel-reminder: true`.
 
@@ -89,7 +88,7 @@ npm run build
 
 ### Produção do frontend
 
-O frontend ainda não foi publicado no Netlify. Antes disso, devem ser definidos o domínio do frontend, CORS restrito ou um proxy de produção, proteção da API e a estratégia para o LocalTunnel. O proxy do Vite existe somente no servidor de desenvolvimento.
+O frontend ainda não foi publicado no Netlify. O endpoint público estável do backend já foi definido pelo Tailscale Funnel; a próxima fase ainda deve implementar o proxy de produção/Netlify Function, proteção da API e política de CORS. O proxy do Vite existe somente no servidor de desenvolvimento.
 
 ## Requisitos do backend
 
@@ -227,16 +226,36 @@ O segundo teste comprova o fluxo Coolify -> `192.168.15.112:20128` -> OmniRoute 
 
 ### URL pública
 
-- Não existe atualmente um hostname LocalTunnel que possa ser documentado como endpoint público persistente.
-- O container `localtunnel-projeto-digitacao` usa `network_mode=host`, restart policy `unless-stopped` e aponta para `127.0.0.1:18001`.
-- O comando solicita `bastosrafael-projeto-digitacao-homelab-api`, mas o teste de restart recebeu outro hostname. URLs aleatórias observadas são apenas evidência diagnóstica e não devem entrar em configurações de produção.
-- O header `bypass-tunnel-reminder: true` evita a página intermediária do LocalTunnel em chamadas de API.
-- O container `localtunnel` original atende outro serviço na porta 3001 em `https://nflnba.loca.lt`. Ele não pertence ao Projeto Digitação e não deve ser alterado, removido ou reutilizado.
+- Projeto Digitação: `https://nflnba.tail08f125.ts.net:8443`.
+- NFLNBA: `https://nflnba.tail08f125.ts.net` na porta HTTPS padrão 443.
+- O mesmo hostname oficial do node Tailscale é usado com listeners distintos; não existe hostname arbitrário fora de `*.ts.net`.
+- A porta pública 8443 encaminha para `http://127.0.0.1:18001`; o backend continua inacessível diretamente pela LAN nessa porta.
+- O TLS é terminado pelo Tailscale, e a configuração fica persistida no estado oficial do `tailscaled`.
+
+Configuração aplicada com Tailscale 1.102.2:
+
+```bash
+sudo tailscale funnel --bg --yes --https=8443 http://127.0.0.1:18001
+tailscale funnel status
+```
+
+O listener do Projeto Digitação pode ser removido isoladamente, sem resetar o NFLNBA:
+
+```bash
+sudo tailscale funnel --https=8443 off
+```
 
 ### Estabilidade do acesso
 
-A dependência do hostname efêmero do container Coolify foi eliminada. O Port Mapping persistido no Coolify é `127.0.0.1:18001:8000`, e o LocalTunnel usa a rede do host para alcançar esse endereço. Assim, um redeploy que troque o nome do container backend não altera o destino local do túnel.
+A dependência do hostname efêmero do container Coolify foi eliminada. O Port Mapping persistido no Coolify é `127.0.0.1:18001:8000`, e o Tailscale Funnel encaminha diretamente para esse endereço. Assim, um redeploy que troque o nome do container backend não altera o destino público.
 
-Na Fase 3D, o serviço público LocalTunnel não preservou o subdomínio solicitado após `docker restart`. O nome original `projeto-digitacao-api` foi recuperado em algumas inicializações, mas reinícios concederam nomes aleatórios. O fallback `projeto-digitacao-bastosrafael-api` também apresentou colisão com uma aplicação Kestrel. O nome mais exclusivo `bastosrafael-projeto-digitacao-homelab-api` funcionou antes do restart, porém o restart voltou a conceder uma URL aleatória.
+Na Fase 3D, o LocalTunnel não preservou subdomínios solicitados após reinícios. Depois da validação externa do Funnel e da confirmação de que NFLNBA continuava saudável, o container `localtunnel-projeto-digitacao` foi parado e removido. Imagens, volumes e redes foram preservados.
 
-Portanto, a rota local está estável, mas a Fase 3D pública permanece bloqueada pela ausência de garantia de subdomínio do LocalTunnel gratuito. Não iniciar a publicação Netlify usando uma URL aleatória. As alternativas para decisão futura, em ordem simples, são: manter o LocalTunnel apenas para testes efêmeros; usar um túnel com hostname reservado; ou configurar domínio/túnel próprio. Nenhuma alternativa adicional foi instalada automaticamente.
+Configuração antiga preservada somente para rollback: imagem `node:20-alpine`, `network_mode=host`, restart `unless-stopped` e comando `lt --port 18001 --local-host 127.0.0.1 --subdomain bastosrafael-projeto-digitacao-homelab-api --print-requests`. Ela não é necessária na arquitetura atual.
+
+Validações da Fase 3E:
+
+- `GET https://nflnba.tail08f125.ts.net:8443/health`: HTTP 200, Uvicorn e `{"status":"ok"}`;
+- `POST https://nflnba.tail08f125.ts.net:8443/api/chat`: HTTP 200 e resposta via OmniRoute;
+- NFLNBA em 443: `/`, `/api/health`, `/api/games/upcoming?league=NFL` e `/nfl` permaneceram HTTP 200;
+- `tailscale funnel status` manteve simultaneamente os listeners 443 e 8443.

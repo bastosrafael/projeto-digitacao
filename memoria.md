@@ -530,3 +530,120 @@ sudo docker rm projeto-digitacao-backend-test
 - [ ] Obter hostname público persistente após restart.
 - [ ] Considerar a Fase 3D pública concluída.
 - [ ] Iniciar Fase 4B/Netlify.
+
+## 2026-08-08 — Fase 3E: Tailscale Funnel
+
+### Resultado
+
+- Fase 3E concluída com acesso público HTTPS estável pelo Tailscale Funnel.
+- Motivo da migração: o LocalTunnel gratuito ignorava ou não preservava subdomínios personalizados após reinícios.
+- Tailscale instalado: versão `1.102.2`.
+- Hostname oficial do node: `nflnba.tail08f125.ts.net`; tailnet observado: `tail08f125.ts.net`.
+- O NFLNBA já ocupava o listener HTTPS 443, encaminhando `/` para `http://127.0.0.1:3001`.
+- Foi adicionado, sem resetar ou substituir o listener existente, o listener HTTPS 8443 para o Projeto Digitação.
+- URL pública final: `https://nflnba.tail08f125.ts.net:8443`.
+- Target local: `http://127.0.0.1:18001`.
+- Port Mapping Coolify preservado: `127.0.0.1:18001:8000`.
+- O bind permaneceu exclusivamente em `127.0.0.1:18001`; não houve exposição em `0.0.0.0:18001`.
+
+### Configuração do Funnel
+
+Comando aplicado:
+
+```bash
+sudo tailscale funnel --bg --yes --https=8443 http://127.0.0.1:18001
+```
+
+Configuração final confirmada por `tailscale funnel status` e `tailscale funnel status --json`:
+
+```text
+https://nflnba.tail08f125.ts.net
+|-- / proxy http://127.0.0.1:3001
+
+https://nflnba.tail08f125.ts.net:8443
+|-- / proxy http://127.0.0.1:18001
+```
+
+- O Tailscale permite Funnel somente nas portas públicas 443, 8443 e 10000; 8443 foi escolhida para manter paths raiz do backend sem rewrite.
+- Rollback isolado, se necessário: `sudo tailscale funnel --https=8443 off`.
+- Não foi usado `tailscale funnel reset`, pois ele afetaria a configuração NFLNBA.
+- A persistência é fornecida pelo estado oficial do `tailscaled`; não foi realizado restart do daemon nem da máquina.
+
+### Validações do Projeto Digitação
+
+- Local, `GET http://127.0.0.1:18001/health`: HTTP 200, `server: uvicorn`, `{"status":"ok"}`.
+- Público, `GET https://nflnba.tail08f125.ts.net:8443/health`: HTTP/2 200, `server: uvicorn`, `{"status":"ok"}`.
+- Público, `POST https://nflnba.tail08f125.ts.net:8443/api/chat`: HTTP/2 200, `{"response":"tailscale funnel funcionando"}`.
+- Fluxo confirmado: Internet -> Tailscale Funnel:8443 -> `127.0.0.1:18001` -> Coolify/FastAPI:8000 -> OmniRoute -> `auto/coding:free` -> resposta.
+
+### Preservação do NFLNBA
+
+- URL preservada: `https://nflnba.tail08f125.ts.net` em HTTPS 443.
+- Target preservado: `http://127.0.0.1:3001`.
+- Depois da inclusão do listener 8443, os seguintes testes retornaram HTTP 200:
+  - `/`;
+  - `/api/health`;
+  - `/api/games/upcoming?league=NFL`;
+  - `/nfl`.
+- Aplicação Coolify, porta 3001, banco SQLite, volumes e configuração Funnel do NFLNBA não foram alterados ou interrompidos.
+
+### Remoção do LocalTunnel do projeto
+
+- Antes da remoção foi registrada a configuração de rollback do container `localtunnel-projeto-digitacao`:
+  - imagem `node:20-alpine`;
+  - `network_mode=host`;
+  - restart policy `unless-stopped`;
+  - destino `127.0.0.1:18001`;
+  - subdomínio solicitado `bastosrafael-projeto-digitacao-homelab-api`;
+  - comando `lt --port 18001 --local-host 127.0.0.1 --subdomain bastosrafael-projeto-digitacao-homelab-api --print-requests`.
+- Somente depois de health/chat públicos e NFLNBA terem sido validados, o container foi parado e removido.
+- A imagem `node:20-alpine` foi preservada; nenhum volume, rede, imagem ou outro container foi removido.
+
+### Arquitetura resultante
+
+```text
+Internet
+  -> https://nflnba.tail08f125.ts.net:8443
+  -> Tailscale Funnel HTTPS 8443
+  -> http://127.0.0.1:18001
+  -> Coolify -> FastAPI:8000
+  -> OmniRoute:20128
+  -> modelo configurado
+```
+
+- Desenvolvimento local permanece Vite -> `/api/chat` -> `http://127.0.0.1:18001`.
+- Nenhum componente, CSS, layout ou comportamento visual do frontend foi alterado.
+- Netlify e Netlify Function não foram iniciados nesta fase.
+
+### Testes do projeto
+
+- Backend: `.venv/bin/python -m pytest -q` retornou `3 passed in 1.12s`.
+- Frontend: `npm run lint` concluído sem erros.
+- Frontend: `npm run build` concluído com Vite 8.2.1, 20 módulos transformados e build em 517 ms.
+- Proxy local: `POST http://127.0.0.1:5173/api/chat` retornou HTTP 200/Uvicorn com `{"response":"proxy local fase 3e funcionando"}`.
+- O servidor Vite temporário foi encerrado depois do teste.
+
+### Arquivos modificados
+
+- `README.md`: arquitetura, URL pública, comandos, rollback e validações do Tailscale Funnel.
+- `memoria.md`: registro integral da Fase 3E.
+
+### Próximo passo
+
+- Iniciar somente após validação do operador a Fase 4B: preparar o proxy de produção/Netlify Function para a URL Tailscale, definir proteção da API e CORS, sem alterar a interface aprovada.
+
+### Checklist da Fase 3E
+
+- [x] Ler memória, README e estado Git antes de agir.
+- [x] Registrar estado inicial de `tailscale funnel status` e `tailscale serve status`.
+- [x] Confirmar Tailscale 1.102.2, hostname e target NFLNBA.
+- [x] Confirmar que HTTPS 8443 poderia coexistir com 443.
+- [x] Preservar o listener NFLNBA em 443.
+- [x] Publicar `127.0.0.1:18001` no Funnel HTTPS 8443.
+- [x] Validar health e chat públicos do Projeto Digitação.
+- [x] Confirmar resposta do OmniRoute.
+- [x] Validar quatro rotas NFLNBA após a alteração.
+- [x] Revalidar persistência pelo estado oficial do Tailscale.
+- [x] Remover somente `localtunnel-projeto-digitacao` depois das validações.
+- [x] Preservar UI, desenvolvimento local, imagens, volumes e redes.
+- [ ] Iniciar Fase 4B/Netlify.
