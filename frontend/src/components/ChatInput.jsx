@@ -17,12 +17,26 @@ function SendIcon() {
   )
 }
 
-export default function ChatInput({ onSend, isLoading }) {
-  const [message, setMessage] = useState('')
-  const [attachmentNotice, setAttachmentNotice] = useState(false)
-  const textareaRef = useRef(null)
+function formatFileSize(sizeBytes) {
+  const sizeMb = sizeBytes / (1024 * 1024)
+  return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(sizeMb)} MB`
+}
 
-  const canSend = message.trim().length > 0 && !isLoading
+export default function ChatInput({
+  onSend,
+  onUpload,
+  isLoading,
+  isUploading,
+  uploadConfig,
+}) {
+  const [message, setMessage] = useState('')
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [attachmentNotice, setAttachmentNotice] = useState(null)
+  const textareaRef = useRef(null)
+  const fileInputRef = useRef(null)
+
+  const isBusy = isLoading || isUploading
+  const canSend = message.trim().length > 0 && !isBusy
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -37,7 +51,6 @@ export default function ChatInput({ onSend, isLoading }) {
 
     onSend(message.trim())
     setMessage('')
-    setAttachmentNotice(false)
   }
 
   function handleKeyDown(event) {
@@ -47,27 +60,83 @@ export default function ChatInput({ onSend, isLoading }) {
     }
   }
 
-  function showAttachmentNotice() {
-    setAttachmentNotice(true)
-    window.setTimeout(() => setAttachmentNotice(false), 3500)
+  async function handleAttachmentClick() {
+    if (!uploadConfig) {
+      setAttachmentNotice('Não foi possível consultar o limite de upload. Tente novamente.')
+      return
+    }
+
+    if (!selectedFile) {
+      fileInputRef.current?.click()
+      return
+    }
+
+    setAttachmentNotice(
+      `Enviando ${selectedFile.name} · ${formatFileSize(selectedFile.size)}...`,
+    )
+    try {
+      await onUpload(selectedFile)
+      setAttachmentNotice(
+        `${selectedFile.name} · ${formatFileSize(selectedFile.size)} recebido com sucesso.`,
+      )
+      setSelectedFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    } catch (error) {
+      setAttachmentNotice(error.message || 'Não foi possível enviar a planilha.')
+    }
+  }
+
+  function handleFileSelection(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      setSelectedFile(null)
+      setAttachmentNotice('Selecione uma planilha no formato .xlsx.')
+      event.target.value = ''
+      return
+    }
+
+    const maxSizeBytes = uploadConfig.max_upload_size_mb * 1024 * 1024
+    if (file.size > maxSizeBytes) {
+      setSelectedFile(null)
+      setAttachmentNotice(
+        `Arquivo excede o limite permitido de ${uploadConfig.max_upload_size_mb} MB.`,
+      )
+      event.target.value = ''
+      return
+    }
+
+    setSelectedFile(file)
+    setAttachmentNotice(
+      `${file.name} · ${formatFileSize(file.size)}. Clique novamente no clipe para enviar.`,
+    )
   }
 
   return (
     <div className="composer-wrap">
       {attachmentNotice && (
         <div className="attachment-notice" role="status">
-          Upload de planilha será habilitado na próxima etapa.
+          {attachmentNotice}
         </div>
       )}
 
-      <div className={`composer ${isLoading ? 'composer--loading' : ''}`}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        onChange={handleFileSelection}
+        hidden
+      />
+
+      <div className={`composer ${isBusy ? 'composer--loading' : ''}`}>
         <button
           className="attachment-button"
           type="button"
-          onClick={showAttachmentNotice}
-          disabled={isLoading}
-          aria-label="Anexar planilha (em breve)"
-          title="Anexar planilha (em breve)"
+          onClick={handleAttachmentClick}
+          disabled={isBusy}
+          aria-label={selectedFile ? 'Enviar planilha selecionada' : 'Anexar planilha'}
+          title={selectedFile ? 'Enviar planilha selecionada' : 'Anexar planilha'}
         >
           <AttachmentIcon />
         </button>
@@ -80,7 +149,7 @@ export default function ChatInput({ onSend, isLoading }) {
           placeholder="Digite sua mensagem..."
           rows="1"
           maxLength="20000"
-          disabled={isLoading}
+          disabled={isBusy}
           aria-label="Mensagem para o assistente"
         />
 

@@ -531,6 +531,110 @@ sudo docker rm projeto-digitacao-backend-test
 - [ ] Considerar a Fase 3D pública concluída.
 - [ ] Iniciar Fase 4B/Netlify.
 
+## 2026-08-08 — Fase 5: upload inicial de XLSX
+
+### Escopo executado
+
+- Implementado somente o recebimento e armazenamento seguro de planilhas `.xlsx`.
+- Não foram implementados leitura de produtos, extração de imagens, pesquisa, jobs, banco ou geração de planilha final.
+- O upload de produção foi desenhado para seguir navegador -> Tailscale Funnel -> FastAPI, sem passar pela Netlify Function do chat.
+
+### Backend
+
+- Variável central `MAX_UPLOAD_SIZE_MB`, padrão 200 MB; aumento futuro exige somente alteração dessa variável no backend.
+- `UPLOAD_DIR` configurável, padrão `/data/uploads` no container.
+- `CORS_ALLOWED_ORIGINS` configurável, restrito inicialmente a `https://projeto-digitacao.netlify.app`.
+- `GET /api/uploads/config` publica o limite necessário para a validação de UX do frontend.
+- `POST /api/uploads` recebe multipart `file`, lê em chunks de 1 MiB e nunca usa `contents = await file.read()`.
+- Bytes são contados durante a cópia. Ao ultrapassar o limite, a operação é interrompida, o `.part` é removido e a API retorna HTTP 413 com mensagem sanitizada.
+- Arquivo temporário recebe modo 600. Após gravação, são validados extensão `.xlsx`, ZIP e as partes mínimas `[Content_Types].xml`, `_rels/.rels` e `xl/workbook.xml`.
+- XMLs obrigatórios têm limite individual de leitura de 2 MiB. Nenhum conteúdo do workbook é interpretado nesta fase.
+- Arquivo inválido ou falha de storage remove parcial/final. Arquivo válido é promovido atomicamente para nome UUID `.xlsx`, sem usar o nome do usuário no caminho.
+- Adicionada dependência `python-multipart==0.0.32`.
+
+### Frontend
+
+- O botão de clipe existente abre seletor restrito a `.xlsx`.
+- Antes do envio, o aviso visual já existente mostra nome e tamanho formatado; segundo clique no clipe confirma o envio.
+- Limite é consultado no backend, evitando hardcode duplicado no JavaScript.
+- Arquivos acima do limite são rejeitados no frontend, sem substituir a validação obrigatória do backend.
+- Envio usa `FormData`; não usa Base64, não define `Content-Type` manualmente e não grava o arquivo no `localStorage`.
+- Upload não possui o timeout de 25 segundos do chat/Netlify Function.
+- `VITE_UPLOAD_API_BASE_URL` foi centralizada no build do Netlify com o endpoint público Tailscale; não contém secret.
+- Nenhum CSS, paleta, tipografia ou framework visual foi alterado. A interface continua baseada no design aprovado, com apenas o comportamento funcional do anexo habilitado.
+
+### Disco e persistência
+
+- `df -hT /opt`: `/dev/sda1`, ext4, 106 GB total, 67 GB usados, 34 GB disponíveis, 67% de uso.
+- Criado `data/uploads/.gitkeep`; o diretório host observado tem modo 775 e owner `rb:rb`.
+- Inspeção do container Coolify atual: `mounts=[]`. Portanto o deploy atual ainda não possui storage persistente para uploads.
+- Antes do redeploy, configurar no Coolify o bind/persistent storage `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`, leitura/escrita.
+- O mount foi validado em container Docker temporário: arquivo persistiu no host com modo 600.
+- Nenhuma quota artificial foi criada. Retenção/cleanup permanece como requisito futuro.
+
+### Testes realizados
+
+- Backend: 10 testes passaram em 0,91 s.
+- Casos cobertos: config, XLSX válido, nome UUID, arquivo exatamente no limite, HTTP 413, remoção de parcial, extensão inválida, ZIP inválido e CORS.
+- Frontend: lint e build passaram; 6 testes da Netlify Function continuaram passando.
+- Frontend upload: 3 testes passaram para config, multipart `FormData` e detalhe sanitizado HTTP 413.
+- Arquivo de referência real não foi localizado em `/opt` ou `/home`.
+- Foi gerado temporariamente um XLSX estruturalmente válido com exatamente 36.236.835 bytes. Upload local retornou HTTP 201, `size_bytes=36236835`, CORS correto e arquivo armazenado com o mesmo tamanho.
+- Imagem `projeto-digitacao-backend:upload-local` construída sem erro.
+- Container temporário em `127.0.0.1:18003 -> 8000` validou health, config, multipart e bind persistente; depois foi parado e removido.
+- Todos os arquivos de teste de upload foram removidos; somente `.gitkeep` permaneceu em `data/uploads`.
+
+### Erros e soluções
+
+- Erro de coleta: literal `bytes` com caracteres acentuados no teste Python.
+- Solução: gerar os bytes por `.encode()` e repetir toda a suíte com sucesso.
+- Limitação encontrada: o container Coolify em produção ainda não possui volume/mount.
+- Solução segura: não alterar o Coolify automaticamente; documentar o mount obrigatório antes do redeploy.
+
+### Arquivos criados
+
+- `backend/app/api/uploads.py`
+- `backend/app/services/upload_service.py`
+- `backend/tests/test_uploads.py`
+- `frontend/tests/upload-api.test.mjs`
+- `data/uploads/.gitkeep`
+
+### Arquivos modificados
+
+- `backend/app/config.py`
+- `backend/app/main.py`
+- `backend/requirements.txt`
+- `backend/.env.example`
+- `frontend/src/App.jsx`
+- `frontend/src/components/ChatInput.jsx`
+- `frontend/src/services/api.js`
+- `frontend/package.json`
+- `netlify.toml`
+- `README.md`
+- `memoria.md`
+
+### Próximo passo
+
+- Configurar manualmente no Coolify o storage persistente `/opt/projeto-digitacao/data/uploads:/data/uploads` e as três variáveis de upload; depois redeployar o backend e validar um upload real pelo frontend Netlify/Tailscale.
+- Somente após essa validação iniciar inspeção/leitura do Excel. Ainda não implementar produtos ou imagens.
+
+### Checklist
+
+- [x] Centralizar limite em `MAX_UPLOAD_SIZE_MB=200`.
+- [x] Gravar incrementalmente em chunks e limpar parciais.
+- [x] Validar extensão, ZIP e estrutura mínima XLSX após salvar.
+- [x] Retornar HTTP 413 sanitizado ao exceder o limite.
+- [x] Expor config do limite para o frontend.
+- [x] Enviar multipart `FormData` direto ao FastAPI, sem Base64.
+- [x] Mostrar nome e tamanho antes do envio.
+- [x] Preservar conteúdo do arquivo fora do `localStorage`.
+- [x] Validar arquivo de 36.236.835 bytes.
+- [x] Auditar disco e mount atual.
+- [x] Testar bind persistente em container temporário.
+- [ ] Configurar persistent storage no Coolify e redeployar.
+- [ ] Validar upload público real em produção.
+- [ ] Iniciar leitura/inspeção do XLSX.
+
 ## Fase 4B — preparação do frontend para Netlify (2026-08-08)
 
 ### Estado inicial

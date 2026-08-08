@@ -14,8 +14,11 @@ Navegador local
 Internet
   -> https://projeto-digitacao.netlify.app/
   -> frontend estático no Netlify
-  -> POST relativo /api/chat
-  -> Netlify Function (proxy server-side)
+  |  -> POST relativo /api/chat
+  |  -> Netlify Function (proxy server-side)
+  |  -> HTTPS Tailscale Funnel :8443
+  |
+  -> upload multipart/form-data direto
   -> HTTPS Tailscale Funnel :8443
   -> http://127.0.0.1:18001
   -> FastAPI no Coolify (porta interna 8000)
@@ -27,6 +30,8 @@ Internet
 O navegador nunca deve acessar o OmniRoute diretamente. A chave, quando necessária, existe somente como variável do backend.
 
 O navegador usa somente `/api/chat`. Durante o desenvolvimento na HOMELAB, o Vite encaminha a requisição para o bind local estável. Em produção, uma Netlify Function encaminha a mesma rota ao Funnel sem expor a URL do backend na lógica do bundle.
+
+Uploads não passam pela Netlify Function: o navegador envia `multipart/form-data` diretamente ao endpoint público do FastAPI no Funnel. Assim, o timeout de 25 segundos do proxy de chat não é reutilizado para arquivos grandes.
 
 ## Repositório
 
@@ -132,6 +137,55 @@ Validação manual de produção concluída no navegador:
 ### Interface aprovada
 
 A interface da Fase 4 está congelada. O commit visual é `fc53ebb`, marcado pela tag anotada `ui-v1-approved`. Consulte `docs/UI_APROVADA.md`. Mudanças de infraestrutura não autorizam alterações em componentes visuais, CSS ou responsividade.
+
+## Upload XLSX
+
+A etapa inicial de upload aceita somente `.xlsx`. Ela armazena o arquivo, valida a estrutura mínima do workbook e retorna os metadados do upload. Ainda não interpreta produtos, lê linhas ou extrai imagens.
+
+Endpoints:
+
+- `GET /api/uploads/config`: informa o limite configurado e extensões aceitas;
+- `POST /api/uploads`: recebe o campo multipart `file` e retorna HTTP 201;
+- arquivo acima do limite: HTTP 413 com detalhe sanitizado;
+- extensão ou estrutura XLSX inválida: HTTP 400 e remoção do arquivo parcial.
+
+O limite fica centralizado no backend:
+
+```dotenv
+MAX_UPLOAD_SIZE_MB=200
+UPLOAD_DIR=/data/uploads
+CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app
+```
+
+O frontend consulta `/api/uploads/config` antes da seleção. Ele mostra nome e tamanho, rejeita antecipadamente arquivos acima do limite para melhorar a experiência e envia o `File` por `FormData`, sem Base64 e sem armazenar seu conteúdo no `localStorage`. A validação definitiva permanece no backend.
+
+O backend lê o `UploadFile` em chunks de 1 MiB, conta os bytes e grava primeiro em `.part`. Se ocorrer erro ou o limite for ultrapassado, remove o parcial. Depois valida extensão, ZIP e as partes mínimas `[Content_Types].xml`, `_rels/.rels` e `xl/workbook.xml`; somente então renomeia atomicamente para `<UUID>.xlsx` com modo 600.
+
+### Storage persistente obrigatório no Coolify
+
+O container atualmente implantado foi inspecionado antes desta implementação e não possuía mounts (`mounts=[]`). **Não fazer redeploy para uso real do upload sem configurar storage persistente.**
+
+Configuração recomendada no Coolify:
+
+- tipo: Persistent Storage / bind mount gerenciado pelo Coolify;
+- origem no HOMELAB: `/opt/projeto-digitacao/data/uploads`;
+- destino no container: `/data/uploads`;
+- leitura/escrita habilitada;
+- variável `UPLOAD_DIR=/data/uploads`;
+- variável `MAX_UPLOAD_SIZE_MB=200`;
+- variável `CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app`.
+
+O diretório de origem está no filesystem ext4 `/dev/sda1`. Na inspeção de 2026-08-08, o filesystem tinha 106 GB totais, 67 GB utilizados e 34 GB disponíveis (67% de uso). Não foi criado quota ou volume artificialmente pequeno. Uma política de retenção/limpeza deverá ser adicionada em fase futura.
+
+O build do Netlify define `VITE_UPLOAD_API_BASE_URL=https://nflnba.tail08f125.ts.net:8443`. Essa URL é pública, não é secret e aparece no bundle por necessidade do upload direto. A chave do OmniRoute continua exclusivamente no Coolify.
+
+### Validações de upload
+
+- suíte backend: 10 testes passando, incluindo arquivo exatamente no limite, HTTP 413, XLSX inválido, limpeza e CORS;
+- suíte frontend de upload: 3 testes passando, incluindo configuração, `FormData` e erro 413;
+- arquivo sintético com exatamente 36.236.835 bytes, equivalente ao porte de `IM0416-26 - PACKING LIST.xlsx`: HTTP 201 e tamanho armazenado preservado;
+- imagem `projeto-digitacao-backend:upload-local`: build concluído e upload validado com bind `/opt/projeto-digitacao/data/uploads:/data/uploads`;
+- arquivo persistido no teste do container com modo 600; container e artefatos temporários removidos após a validação.
 
 ## Requisitos do backend
 
@@ -248,6 +302,9 @@ Configure as seguintes variáveis no painel do Coolify, sem colocá-las no repos
 OMNIROUTE_BASE_URL=http://192.168.15.112:20128/v1
 OMNIROUTE_API_KEY=<segredo-configurado-no-coolify>
 OMNIROUTE_MODEL=auto/coding:free
+MAX_UPLOAD_SIZE_MB=200
+UPLOAD_DIR=/data/uploads
+CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app
 ```
 
 Se o OmniRoute local continuar sem exigir autenticação, `OMNIROUTE_API_KEY` pode permanecer vazia. A chave, quando necessária, deve existir somente como variável protegida do backend.

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import ChatInput from './components/ChatInput.jsx'
 import ChatMessage, { LoadingMessage } from './components/ChatMessage.jsx'
 import Header from './components/Header.jsx'
-import { sendMessage } from './services/api.js'
+import { getUploadConfig, sendMessage, uploadSpreadsheet } from './services/api.js'
 
 const STORAGE_KEY = 'projeto-digitacao:chat-history:v1'
 
@@ -44,6 +44,8 @@ function loadMessages() {
 export default function App() {
   const [messages, setMessages] = useState(loadMessages)
   const [isLoading, setIsLoading] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadConfig, setUploadConfig] = useState(null)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
@@ -53,6 +55,14 @@ export default function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
+
+  useEffect(() => {
+    getUploadConfig()
+      .then(setUploadConfig)
+      .catch((error) => {
+        console.error('Não foi possível carregar a configuração de upload.', error)
+      })
+  }, [])
 
   async function handleSend(text) {
     if (isLoading) return
@@ -101,6 +111,17 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(initialMessages))
   }
 
+  async function handleUpload(file) {
+    if (isUploading) return null
+
+    setIsUploading(true)
+    try {
+      return await uploadSpreadsheet(file)
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <div className="ambient-shape ambient-shape--one" />
@@ -128,7 +149,13 @@ export default function App() {
         </main>
 
         <footer className="chat-footer">
-          <ChatInput onSend={handleSend} isLoading={isLoading} />
+          <ChatInput
+            onSend={handleSend}
+            onUpload={handleUpload}
+            isLoading={isLoading}
+            isUploading={isUploading}
+            uploadConfig={uploadConfig}
+          />
           <p className="privacy-note">Sua conversa fica salva somente neste navegador.</p>
         </footer>
       </div>

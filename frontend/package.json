@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:function": "node --test tests/netlify-chat.test.mjs"
+    "test:function": "node --test tests/netlify-chat.test.mjs",
+    "test:upload": "node --test tests/upload-api.test.mjs"
   },
   "dependencies": {
     "react": "19.2.8",
