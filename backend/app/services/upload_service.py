@@ -37,7 +37,7 @@ class UploadSizeError(Exception):
 
 @dataclass(frozen=True)
 class StoredUpload:
-    upload_id: str
+    file_id: str
     original_filename: str
     stored_filename: str
     size_bytes: int
@@ -45,6 +45,16 @@ class StoredUpload:
 
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+def sanitize_original_filename(filename: str | None) -> str:
+    basename = Path((filename or "arquivo.xlsx").replace("\\", "/")).name
+    sanitized = "".join(character for character in basename if character.isprintable())
+    sanitized = sanitized.strip().strip(".") or "arquivo.xlsx"
+    if len(sanitized) > 255:
+        suffix = Path(sanitized).suffix
+        sanitized = f"{Path(sanitized).stem[: 255 - len(suffix)]}{suffix}"
+    return sanitized
 
 
 def _read_required_xml(archive: ZipFile, name: str) -> ElementTree.Element:
@@ -106,10 +116,10 @@ def validate_xlsx(path: Path, original_filename: str) -> None:
 
 
 async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
-    upload_id = str(uuid4())
-    original_filename = Path(upload.filename or "arquivo.xlsx").name
-    temporary_path = settings.upload_dir / f".{upload_id}.part"
-    final_path = settings.upload_dir / f"{upload_id}.xlsx"
+    file_id = str(uuid4())
+    original_filename = sanitize_original_filename(upload.filename)
+    temporary_path = settings.upload_dir / f".{file_id}.part"
+    final_path = settings.upload_dir / f"{file_id}.xlsx"
     size_bytes = 0
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
@@ -134,12 +144,12 @@ async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
         raise
 
     logger.info(
-        "Upload XLSX armazenado: upload_id=%s size_bytes=%d",
-        upload_id,
+        "Upload XLSX armazenado: file_id=%s size_bytes=%d",
+        file_id,
         size_bytes,
     )
     return StoredUpload(
-        upload_id=upload_id,
+        file_id=file_id,
         original_filename=original_filename,
         stored_filename=final_path.name,
         size_bytes=size_bytes,

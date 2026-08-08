@@ -32,11 +32,12 @@ export default function ChatInput({
   const [message, setMessage] = useState('')
   const [selectedFile, setSelectedFile] = useState(null)
   const [attachmentNotice, setAttachmentNotice] = useState(null)
+  const [uploadState, setUploadState] = useState('idle')
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
 
   const isBusy = isLoading || isUploading
-  const canSend = message.trim().length > 0 && !isBusy
+  const canSend = (message.trim().length > 0 || selectedFile !== null) && !isBusy
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -46,8 +47,28 @@ export default function ChatInput({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`
   }, [message])
 
-  function submit() {
+  async function submit() {
     if (!canSend) return
+
+    if (selectedFile) {
+      setUploadState('uploading')
+      setAttachmentNotice(
+        `Enviando ${selectedFile.name} · ${formatFileSize(selectedFile.size)}...`,
+      )
+      try {
+        const result = await onUpload(selectedFile)
+        setUploadState('uploaded')
+        setAttachmentNotice(
+          `${selectedFile.name} · ${formatFileSize(selectedFile.size)} recebido com sucesso. ID: ${result.file_id}`,
+        )
+        setSelectedFile(null)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+      } catch (error) {
+        setUploadState('error')
+        setAttachmentNotice(error.message || 'Não foi possível enviar a planilha.')
+      }
+      return
+    }
 
     onSend(message.trim())
     setMessage('')
@@ -62,28 +83,20 @@ export default function ChatInput({
 
   async function handleAttachmentClick() {
     if (!uploadConfig) {
+      setUploadState('error')
       setAttachmentNotice('Não foi possível consultar o limite de upload. Tente novamente.')
       return
     }
 
-    if (!selectedFile) {
-      fileInputRef.current?.click()
+    if (selectedFile) {
+      setSelectedFile(null)
+      setUploadState('idle')
+      setAttachmentNotice('Anexo removido.')
+      if (fileInputRef.current) fileInputRef.current.value = ''
       return
     }
 
-    setAttachmentNotice(
-      `Enviando ${selectedFile.name} · ${formatFileSize(selectedFile.size)}...`,
-    )
-    try {
-      await onUpload(selectedFile)
-      setAttachmentNotice(
-        `${selectedFile.name} · ${formatFileSize(selectedFile.size)} recebido com sucesso.`,
-      )
-      setSelectedFile(null)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    } catch (error) {
-      setAttachmentNotice(error.message || 'Não foi possível enviar a planilha.')
-    }
+    fileInputRef.current?.click()
   }
 
   function handleFileSelection(event) {
@@ -92,6 +105,7 @@ export default function ChatInput({
 
     if (!file.name.toLowerCase().endsWith('.xlsx')) {
       setSelectedFile(null)
+      setUploadState('error')
       setAttachmentNotice('Selecione uma planilha no formato .xlsx.')
       event.target.value = ''
       return
@@ -100,6 +114,7 @@ export default function ChatInput({
     const maxSizeBytes = uploadConfig.max_upload_size_mb * 1024 * 1024
     if (file.size > maxSizeBytes) {
       setSelectedFile(null)
+      setUploadState('error')
       setAttachmentNotice(
         `Arquivo excede o limite permitido de ${uploadConfig.max_upload_size_mb} MB.`,
       )
@@ -108,13 +123,14 @@ export default function ChatInput({
     }
 
     setSelectedFile(file)
+    setUploadState('selected')
     setAttachmentNotice(
-      `${file.name} · ${formatFileSize(file.size)}. Clique novamente no clipe para enviar.`,
+      `${file.name} · ${formatFileSize(file.size)}. Enviar confirma; o clipe remove.`,
     )
   }
 
   return (
-    <div className="composer-wrap">
+    <div className="composer-wrap" data-upload-state={uploadState}>
       {attachmentNotice && (
         <div className="attachment-notice" role="status">
           {attachmentNotice}
@@ -135,8 +151,8 @@ export default function ChatInput({
           type="button"
           onClick={handleAttachmentClick}
           disabled={isBusy}
-          aria-label={selectedFile ? 'Enviar planilha selecionada' : 'Anexar planilha'}
-          title={selectedFile ? 'Enviar planilha selecionada' : 'Anexar planilha'}
+          aria-label={selectedFile ? 'Remover planilha selecionada' : 'Anexar planilha'}
+          title={selectedFile ? 'Remover planilha selecionada' : 'Anexar planilha'}
         >
           <AttachmentIcon />
         </button>
@@ -158,7 +174,7 @@ export default function ChatInput({
           type="button"
           onClick={submit}
           disabled={!canSend}
-          aria-label="Enviar mensagem"
+          aria-label={selectedFile ? 'Enviar planilha' : 'Enviar mensagem'}
         >
           <span>Enviar</span>
           <SendIcon />

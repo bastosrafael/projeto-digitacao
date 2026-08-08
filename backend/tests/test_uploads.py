@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
 from app.main import app
+from app.services.omniroute import OmniRouteService
+from app.services.upload_service import sanitize_original_filename
 
 client = TestClient(app)
 
@@ -87,9 +89,26 @@ def test_upload_accepts_valid_xlsx_and_uses_uuid_name(upload_settings: Settings)
     assert payload["filename"] == "IM0416-26 - PACKING LIST.xlsx"
     assert payload["size_bytes"] == len(data)
     assert payload["status"] == "uploaded"
-    assert payload["stored_filename"] == f'{payload["upload_id"]}.xlsx'
+    assert payload["stored_filename"] == f'{payload["file_id"]}.xlsx'
     assert (upload_settings.upload_dir / payload["stored_filename"]).read_bytes() == data
     assert not list(upload_settings.upload_dir.glob("*.part"))
+
+
+def test_upload_never_calls_omniroute(
+    upload_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def forbidden_chat(self: OmniRouteService, message: str) -> str:
+        raise AssertionError("O upload não deve chamar o OmniRoute")
+
+    monkeypatch.setattr(OmniRouteService, "chat", forbidden_chat)
+
+    response = client.post(
+        "/api/uploads",
+        files={"file": ("produtos.xlsx", make_xlsx(), "application/octet-stream")},
+    )
+
+    assert response.status_code == 201
 
 
 def test_upload_accepts_file_exactly_at_limit(upload_settings: Settings) -> None:
@@ -102,6 +121,11 @@ def test_upload_accepts_file_exactly_at_limit(upload_settings: Settings) -> None
 
     assert response.status_code == 201
     assert response.json()["size_bytes"] == 1024 * 1024
+
+
+def test_original_filename_is_metadata_sanitized() -> None:
+    assert sanitize_original_filename("../../pasta\\produtos\x00.xlsx") == "produtos.xlsx"
+    assert sanitize_original_filename(".xlsx") == "xlsx"
 
 
 def test_upload_rejects_file_over_limit_and_removes_partial(upload_settings: Settings) -> None:

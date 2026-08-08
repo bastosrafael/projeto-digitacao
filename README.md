@@ -44,7 +44,7 @@ Uploads não passam pela Netlify Function: o navegador envia `multipart/form-dat
 
 O frontend da Fase 4 é uma interface responsiva de chat feita com React 19 e Vite 8. Ele oferece mensagens de usuário e assistente, loading, erros amigáveis, envio com Enter, quebra de linha com Shift+Enter, limpeza da conversa, scroll automático e histórico no `localStorage` do navegador.
 
-O botão de anexo é apenas visual nesta fase e informa que o upload de planilha será habilitado posteriormente.
+O botão de anexo aceita planilhas `.xlsx`, mostra nome e tamanho e permite remover o arquivo antes do envio. O upload é confirmado pelo botão Enviar e segue diretamente ao FastAPI, sem passar pela Function de chat.
 
 ### Instalação
 
@@ -145,7 +145,7 @@ A etapa inicial de upload aceita somente `.xlsx`. Ela armazena o arquivo, valida
 Endpoints:
 
 - `GET /api/uploads/config`: informa o limite configurado e extensões aceitas;
-- `POST /api/uploads`: recebe o campo multipart `file` e retorna HTTP 201;
+- `POST /api/uploads`: recebe o campo multipart `file`, retorna HTTP 201 e um `file_id` UUID;
 - arquivo acima do limite: HTTP 413 com detalhe sanitizado;
 - extensão ou estrutura XLSX inválida: HTTP 400 e remoção do arquivo parcial.
 
@@ -157,9 +157,9 @@ UPLOAD_DIR=/data/uploads
 CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app
 ```
 
-O frontend consulta `/api/uploads/config` antes da seleção. Ele mostra nome e tamanho, rejeita antecipadamente arquivos acima do limite para melhorar a experiência e envia o `File` por `FormData`, sem Base64 e sem armazenar seu conteúdo no `localStorage`. A validação definitiva permanece no backend.
+O frontend consulta `/api/uploads/config` antes da seleção. Ele mostra nome e tamanho, permite remover pelo mesmo clipe antes do envio, rejeita antecipadamente arquivos acima do limite para melhorar a experiência e envia o `File` por `FormData`, sem Base64 e sem armazenar seu conteúdo no `localStorage`. Os estados técnicos são `selected`, `uploading`, `uploaded` e `error`. A validação definitiva permanece no backend.
 
-O backend lê o `UploadFile` em chunks de 1 MiB, conta os bytes e grava primeiro em `.part`. Se ocorrer erro ou o limite for ultrapassado, remove o parcial. Depois valida extensão, ZIP e as partes mínimas `[Content_Types].xml`, `_rels/.rels` e `xl/workbook.xml`; somente então renomeia atomicamente para `<UUID>.xlsx` com modo 600.
+O backend lê o `UploadFile` em chunks de 1 MiB, conta os bytes e grava primeiro em `.part`. Se ocorrer erro ou o limite for ultrapassado, remove o parcial. Depois valida extensão, ZIP e as partes mínimas `[Content_Types].xml`, `_rels/.rels` e `xl/workbook.xml`; somente então renomeia atomicamente para `<UUID>.xlsx` com modo 600. O nome original é sanitizado e mantido apenas como metadado; nunca compõe o caminho físico. O arquivo não é enviado ao OmniRoute.
 
 ### Storage persistente obrigatório no Coolify
 
@@ -181,11 +181,13 @@ O build do Netlify define `VITE_UPLOAD_API_BASE_URL=https://nflnba.tail08f125.ts
 
 ### Validações de upload
 
-- suíte backend: 10 testes passando, incluindo arquivo exatamente no limite, HTTP 413, XLSX inválido, limpeza e CORS;
+- suíte backend: 12 testes passando, incluindo arquivo exatamente no limite, HTTP 413, falso `.xlsx`, limpeza, CORS e garantia de que o upload não chama o OmniRoute;
 - suíte frontend de upload: 3 testes passando, incluindo configuração, `FormData` e erro 413;
 - arquivo sintético com exatamente 36.236.835 bytes, equivalente ao porte de `IM0416-26 - PACKING LIST.xlsx`: HTTP 201 e tamanho armazenado preservado;
 - imagem `projeto-digitacao-backend:upload-local`: build concluído e upload validado com bind `/opt/projeto-digitacao/data/uploads:/data/uploads`;
 - arquivo persistido no teste do container com modo 600; container e artefatos temporários removidos após a validação.
+
+O código da Fase 5A está preparado localmente, mas a fase permanece bloqueada para produção até que o mount persistente acima seja criado no Coolify. O código não deve ser enviado ao GitHub antes dessa configuração, pois o Auto Deploy poderia iniciar uma versão que grava uploads no filesystem efêmero do container.
 
 ## Requisitos do backend
 

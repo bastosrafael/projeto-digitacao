@@ -32,13 +32,13 @@ test('envia XLSX como FormData sem definir Content-Type manualmente', async (con
     assert.equal(options.headers, undefined)
     assert.ok(options.body instanceof FormData)
     assert.equal(options.body.get('file').name, 'produtos.xlsx')
-    return Response.json({ upload_id: '123', status: 'uploaded' }, { status: 201 })
+    return Response.json({ file_id: '123', status: 'uploaded' }, { status: 201 })
   }
 
   const file = new File(['xlsx'], 'produtos.xlsx', {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
-  assert.deepEqual(await uploadSpreadsheet(file), { upload_id: '123', status: 'uploaded' })
+  assert.deepEqual(await uploadSpreadsheet(file), { file_id: '123', status: 'uploaded' })
 })
 
 test('propaga detalhe sanitizado do backend', async (context) => {

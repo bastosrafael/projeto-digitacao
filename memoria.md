@@ -531,7 +531,7 @@ sudo docker rm projeto-digitacao-backend-test
 - [ ] Considerar a Fase 3D pública concluída.
 - [ ] Iniciar Fase 4B/Netlify.
 
-## 2026-08-08 — Fase 5: upload inicial de XLSX
+## 2026-08-08 — Fase 5A: upload inicial de XLSX — bloqueada por storage de produção
 
 ### Escopo executado
 
@@ -555,13 +555,16 @@ sudo docker rm projeto-digitacao-backend-test
 ### Frontend
 
 - O botão de clipe existente abre seletor restrito a `.xlsx`.
-- Antes do envio, o aviso visual já existente mostra nome e tamanho formatado; segundo clique no clipe confirma o envio.
+- Antes do envio, o aviso visual já existente mostra nome e tamanho formatado; o botão Enviar confirma e o mesmo clipe remove o anexo.
 - Limite é consultado no backend, evitando hardcode duplicado no JavaScript.
 - Arquivos acima do limite são rejeitados no frontend, sem substituir a validação obrigatória do backend.
 - Envio usa `FormData`; não usa Base64, não define `Content-Type` manualmente e não grava o arquivo no `localStorage`.
 - Upload não possui o timeout de 25 segundos do chat/Netlify Function.
 - `VITE_UPLOAD_API_BASE_URL` foi centralizada no build do Netlify com o endpoint público Tailscale; não contém secret.
 - Nenhum CSS, paleta, tipografia ou framework visual foi alterado. A interface continua baseada no design aprovado, com apenas o comportamento funcional do anexo habilitado.
+- Estados explícitos implementados no composer: `selected`, `uploading`, `uploaded` e `error`.
+- A resposta de sucesso contém `file_id`; esse UUID também define o nome físico, enquanto o filename original sanitizado existe somente como metadado.
+- O arquivo não é enviado ao OmniRoute em nenhuma etapa do upload.
 
 ### Disco e persistência
 
@@ -574,8 +577,8 @@ sudo docker rm projeto-digitacao-backend-test
 
 ### Testes realizados
 
-- Backend: 10 testes passaram em 0,91 s.
-- Casos cobertos: config, XLSX válido, nome UUID, arquivo exatamente no limite, HTTP 413, remoção de parcial, extensão inválida, ZIP inválido e CORS.
+- Backend: 12 testes passaram na validação final.
+- Casos cobertos: config, XLSX válido, nome UUID, filename sanitizado, arquivo exatamente no limite, HTTP 413, remoção de parcial, extensão inválida, falso `.xlsx`/ZIP inválido, CORS e garantia de que o upload não chama o OmniRoute.
 - Frontend: lint e build passaram; 6 testes da Netlify Function continuaram passando.
 - Frontend upload: 3 testes passaram para config, multipart `FormData` e detalhe sanitizado HTTP 413.
 - Arquivo de referência real não foi localizado em `/opt` ou `/home`.
@@ -590,6 +593,7 @@ sudo docker rm projeto-digitacao-backend-test
 - Solução: gerar os bytes por `.encode()` e repetir toda a suíte com sucesso.
 - Limitação encontrada: o container Coolify em produção ainda não possui volume/mount.
 - Solução segura: não alterar o Coolify automaticamente; documentar o mount obrigatório antes do redeploy.
+- Estado da fase: implementação e testes locais concluídos, porém a **Fase 5A ainda não está concluída em produção**. É necessária ação manual no Coolify para criar o storage persistente antes de push/redeploy.
 
 ### Arquivos criados
 
@@ -616,6 +620,7 @@ sudo docker rm projeto-digitacao-backend-test
 ### Próximo passo
 
 - Configurar manualmente no Coolify o storage persistente `/opt/projeto-digitacao/data/uploads:/data/uploads` e as três variáveis de upload; depois redeployar o backend e validar um upload real pelo frontend Netlify/Tailscale.
+- Os commits da implementação devem permanecer somente locais até o storage estar configurado, evitando que o Auto Deploy publique a versão de upload sobre filesystem efêmero.
 - Somente após essa validação iniciar inspeção/leitura do Excel. Ainda não implementar produtos ou imagens.
 
 ### Checklist
@@ -627,6 +632,10 @@ sudo docker rm projeto-digitacao-backend-test
 - [x] Expor config do limite para o frontend.
 - [x] Enviar multipart `FormData` direto ao FastAPI, sem Base64.
 - [x] Mostrar nome e tamanho antes do envio.
+- [x] Permitir remover o anexo antes do envio usando o clipe existente.
+- [x] Retornar `file_id` e manter filename sanitizado apenas como metadado.
+- [x] Implementar estados `selected`, `uploading`, `uploaded` e `error`.
+- [x] Garantir que o arquivo não seja enviado ao OmniRoute.
 - [x] Preservar conteúdo do arquivo fora do `localStorage`.
 - [x] Validar arquivo de 36.236.835 bytes.
 - [x] Auditar disco e mount atual.

@@ -13,7 +13,7 @@ class UploadConfigResponse(BaseModel):
 
 
 class UploadResponse(BaseModel):
-    upload_id: str
+    file_id: str
     filename: str
     stored_filename: str
     size_bytes: int
@@ -51,7 +51,7 @@ async def upload_spreadsheet(
         await file.close()
 
     return UploadResponse(
-        upload_id=stored.upload_id,
+        file_id=stored.file_id,
         filename=stored.original_filename,
         stored_filename=stored.stored_filename,
         size_bytes=stored.size_bytes,
