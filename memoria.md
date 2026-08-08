@@ -644,6 +644,183 @@ sudo docker rm projeto-digitacao-backend-test
 - [ ] Validar upload público real em produção.
 - [ ] Iniciar leitura/inspeção do XLSX.
 
+### Auditoria de retomada da Fase 5A — 2026-08-08
+
+- Container ativo do backend encontrado em estado `running/healthy` pela label `coolify.applicationId=3`.
+- `docker inspect` confirmou novamente ausência total de mounts na implantação ativa; portanto `/data/uploads` ainda não está associado ao bind persistente exigido.
+- As variáveis não secretas `MAX_UPLOAD_SIZE_MB`, `UPLOAD_DIR` e `CORS_ALLOWED_ORIGINS` não estavam presentes no ambiente do container ativo.
+- Port Mapping preservado: `127.0.0.1:18001:8000`, com socket ouvindo exclusivamente no loopback.
+- Tailscale Funnel preservado: HTTPS 443 continua apontando ao NFLNBA em `127.0.0.1:3001`; HTTPS 8443 continua apontando ao Projeto Digitação em `127.0.0.1:18001`.
+- Decisão segura: não fazer push nem redeploy, porque isso poderia publicar o upload usando filesystem efêmero.
+- Solução necessária: operador deve adicionar no Coolify o bind mount RW `projeto-digitacao-uploads`, Source `/opt/projeto-digitacao/data/uploads`, Destination `/data/uploads`, e configurar as três variáveis como Runtime ON/Buildtime OFF.
+- Próximo passo: após confirmação manual, publicar os commits locais, acompanhar o deploy e validar mount, endpoints, upload e persistência antes de marcar a Fase 5A como concluída.
+- Checklist da retomada: roadmap permanente registrado; storage e variáveis auditados; bind/Funnel preservados; push, deploy e Fase 5B não iniciados.
+
+## ROADMAP APÓS FASE 5A — PACKING LIST / DUIMP
+
+Este roadmap é permanente. Os arquivos reais de referência são:
+
+- `IM0416-26 - PACKING LIST.xlsx`;
+- `IM0342-26 - PACKING LIST com fob.xlsx`.
+
+Esses arquivos podem possuir estruturas diferentes, não devem ser adicionados ao Git e serão usados posteriormente como arquivos reais de teste por upload.
+
+### Fase 5B — leitor universal de Packing List
+
+Objetivo: receber diferentes formatos de planilhas XLSX e entender automaticamente sua estrutura, sem depender de um template fixo.
+
+Requisitos:
+
+1. detectar abas relevantes;
+2. detectar linha ou linhas de cabeçalho;
+3. detectar semanticamente a coluna de código/modelo/style;
+4. procurar cabeçalhos equivalentes como `Style number`, `Style`, `Style No.`, `Code`, `Código`, `Item Code`, `Item No.`, `SKU`, `Reference`, `Ref.`, `Modelo`, `Model`, `款号`, `货号` e variações semelhantes;
+5. não depender literalmente do nome `Style number`;
+6. quando o cabeçalho não for claro, analisar semanticamente os valores da coluna para inferir qual coluna contém códigos/modelos;
+7. detectar imagens incorporadas na planilha;
+8. relacionar cada imagem à linha/célula correspondente;
+9. classificar as imagens, quando possível, entre imagem principal do produto, etiqueta de composição, etiqueta de lavagem, hangtag e outra imagem auxiliar;
+10. não confundir etiqueta ou hangtag com a foto principal do produto;
+11. relacionar imagem ↔ linha ↔ Style number/code ↔ demais dados do produto;
+12. normalizar códigos quando houver textos auxiliares junto ao código;
+13. agrupar linhas repetidas que representam o mesmo código/produto;
+14. não gerar descrições diferentes para o mesmo produto apenas porque ele aparece em várias linhas logísticas;
+15. coletar também, quando existirem: NCM, item name, nome do produto, composição, material, construção/tecelagem, cor, tamanho, fabricante, fornecedor, hangtag, etiqueta e outras características presentes na planilha;
+16. gerar estrutura JSON interna por produto;
+17. se não houver código identificável, não inventar código: usar identificador interno controlado, por exemplo `ROW-00045`, e marcar `status = REVISAR`.
+
+A Fase 5B não fará pesquisa na internet.
+
+### Fase 6 — pesquisa real na internet
+
+Objetivo: pesquisar produtos reais usando informações extraídas da planilha.
+
+A IA não deve fingir que pesquisou na internet. Ela somente poderá afirmar que pesquisou ou encontrou informação na internet quando o backend tiver executado uma pesquisa real e fornecido resultados reais ao modelo.
+
+Fluxo obrigatório:
+
+```text
+Style number / Code
++ nome existente
++ NCM
++ marca/fabricante
++ dados da planilha
++ imagem, quando aplicável
+  -> motor/ferramenta real de busca
+  -> resultados reais
+  -> páginas/fontes
+  -> dados fornecidos à IA
+```
+
+Prioridade de fontes, quando disponíveis:
+
+1. fabricante;
+2. fornecedor oficial;
+3. catálogo oficial;
+4. distribuidor confiável;
+5. lojas especializadas;
+6. marketplaces como evidência secundária.
+
+O modelo não poderá inventar URLs ou fontes. Todas as fontes utilizadas deverão ser registradas.
+
+### Fase 7 — análise visual e cruzamento de evidências
+
+Objetivo: usar imagens da planilha como evidência adicional. A imagem não deve ser a única fonte da verdade quando existir informação documental melhor.
+
+Cruzar código/style, dados da planilha, NCM, composição, etiquetas, hangtag, imagem principal e resultados reais da internet.
+
+A IA com visão poderá ajudar a reconhecer categoria da peça/produto, formato, detalhes visuais, cor, mangas, alças, comprimento, acabamentos, elementos visuais e textos legíveis quando apropriado.
+
+Ela não poderá inventar como fato técnico composição, percentual de fibras, material, fabricante, modelo ou característica não comprovada apenas pela aparência. Se a imagem parecer poliéster, isso não é suficiente para registrar `100% POLIÉSTER`. A informação deverá vir da planilha, etiqueta, catálogo, fabricante, fornecedor, fonte web confiável ou outra evidência documental.
+
+### Fase 8 — descrição técnica para DUIMP
+
+Objetivo: gerar descrição técnica, objetiva e adequada ao processo de DUIMP, sem linguagem comercial ou publicitária.
+
+Padrão desejado:
+
+> VESTIDO CURTO FEMININO, DE USO ADULTO, CONFECCIONADO EM TECIDO PLANO DE FIBRAS SINTÉTICAS (100% POLIÉSTER), SEM MANGAS, COM ALÇAS LARGAS, CORPO COM ACABAMENTO EM LASTEX, BABADOS DO MESMO TECIDO E FORRO INTERNO CONFECCIONADO EM 95% POLIÉSTER E 5% ELASTANO, NA COR ROSA.
+
+A descrição deverá ser construída a partir de dados e evidências. Nunca completar composição, percentuais, material ou características técnicas apenas por parecerem prováveis.
+
+Cada produto deverá manter dados estruturados antes da descrição final. Exemplo conceitual:
+
+```json
+{
+  "code": "WW77#",
+  "ncm": "6104.43.00",
+  "product_type": "vestido feminino",
+  "construction": "tecido plano",
+  "outer_material": "100% poliéster",
+  "lining": "95% poliéster, 5% elastano",
+  "color": "rosa",
+  "sources": {
+    "spreadsheet": true,
+    "product_image": true,
+    "label_image": true,
+    "web": []
+  },
+  "confidence": "alta",
+  "status": "OK"
+}
+```
+
+Somente após estruturar e validar os dados será gerado o texto técnico.
+
+### Confiabilidade
+
+Todo produto deverá possuir confiança `ALTA`, `MÉDIA` ou `BAIXA` e um dos status `OK`, `REVISAR`, `NÃO ENCONTRADO`, `ERRO` ou `PENDENTE`.
+
+Se houver dúvida relevante, não inventar: marcar `REVISAR`. Se não houver evidência suficiente, usar `NÃO ENCONTRADO` ou `REVISAR`, conforme o caso.
+
+### Fase 9 — planilha final para download
+
+Objetivo: gerar um novo XLSX baixável pela interface, preservando sempre que possível os dados originais.
+
+Saída mínima:
+
+- Código;
+- Imagem;
+- Produto;
+- Descrição técnica DUIMP;
+- Fonte;
+- Confiança;
+- Status.
+
+Quando apropriado, também manter NCM, dados originais, composição e outras colunas úteis.
+
+### Arquitetura final planejada
+
+```text
+Excel
+  -> Upload
+  -> Leitor universal
+  -> Detecção da estrutura
+  -> Imagem ↔ Style/Code
+  -> Agrupamento de produtos
+  -> Dados estruturados
+  -> Pesquisa REAL na internet
+  -> Análise visual
+  -> Cruzamento de evidências
+  -> Descrição técnica DUIMP
+  -> Confiança/status
+  -> Novo Excel
+  -> Download
+```
+
+### REGRA CRÍTICA DE VERACIDADE
+
+> **A IA NÃO É A FONTE PRIMÁRIA DA VERDADE.**
+
+A IA deve atuar como analisador dos dados fornecidos pelo sistema.
+
+Nunca permitir a afirmação `pesquisei na internet` se nenhuma ferramenta real de busca tiver sido executada. Nunca permitir que composição, material, percentuais, código, fabricante ou outras características técnicas sejam inventados sem evidência.
+
+### Limite desta execução
+
+- Não iniciar a Fase 5B antes da conclusão e validação em produção da Fase 5A.
+- Não extrair imagens, interpretar produtos, pesquisar na internet, gerar descrição DUIMP ou gerar Excel final nesta execução.
+
 ## Fase 4B — preparação do frontend para Netlify (2026-08-08)
 
 ### Estado inicial
