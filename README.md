@@ -1,6 +1,24 @@
 # Projeto Digitação
 
-Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O estado atual implementa o backend das fases 1 a 3: health check, chat por meio do OmniRoute local e execução validada em container Docker.
+Aplicação para conversar com IA e, em fases futuras, enriquecer planilhas de produtos. O backend possui health check, chat por meio do OmniRoute local e execução validada em container Docker. O código está publicado no GitHub; o deploy no Coolify ainda depende de configuração autenticada no dashboard.
+
+## Arquitetura atual
+
+```text
+Cliente
+  -> FastAPI (porta interna 8000)
+  -> OmniRoute na rede local (192.168.15.112:20128)
+  -> rota/modelo configurado por OMNIROUTE_MODEL
+  -> resposta da IA
+```
+
+O navegador nunca deve acessar o OmniRoute diretamente. A chave, quando necessária, existe somente como variável do backend.
+
+## Repositório
+
+- GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
+- Branch principal: `main`
+- Diretório do backend: `/backend`
 
 ## Requisitos
 
@@ -83,7 +101,26 @@ docker rm projeto-digitacao-backend-test
 
 ## Preparação para Coolify
 
-O deploy ainda não foi realizado. Para uma configuração futura no Coolify:
+O deploy ainda não foi realizado. A API administrativa local exige autenticação e nenhuma credencial de automação foi fornecida ao projeto, portanto a criação deve ser feita no dashboard por um operador autorizado.
+
+### Configuração da aplicação
+
+No dashboard do Coolify em `http://192.168.15.112:8000`:
+
+1. entre com uma conta autorizada;
+2. crie ou selecione o projeto `projeto-digitacao`;
+3. adicione uma aplicação chamada `projeto-digitacao-backend`;
+4. escolha GitHub como fonte e o repositório `bastosrafael/projeto-digitacao`;
+5. selecione a branch `main`;
+6. escolha build por Dockerfile;
+7. configure Base Directory como `/backend` e Dockerfile como `Dockerfile`;
+8. configure a porta interna/exposta como `8000`, sem publicar `8000:8000` diretamente no host;
+9. configure o health check HTTP com o caminho `/health`;
+10. adicione as variáveis abaixo no painel, marcando a chave como secret quando aplicável;
+11. salve e acione o deploy;
+12. confirme nos logs que o Uvicorn iniciou em `0.0.0.0:8000` e que o health check ficou saudável.
+
+Resumo da configuração:
 
 - use `backend/` como contexto de build e `backend/Dockerfile` como Dockerfile;
 - configure a porta interna da aplicação como `8000`;
@@ -103,3 +140,21 @@ OMNIROUTE_MODEL=auto/coding:free
 Se o OmniRoute local continuar sem exigir autenticação, `OMNIROUTE_API_KEY` pode permanecer vazia. A chave, quando necessária, deve existir somente como variável protegida do backend.
 
 A imagem `projeto-digitacao-backend:local` foi construída e validada com `/health` e `/api/chat`. Excel, frontend e deploy não fazem parte do estado atual.
+
+### Validação depois do deploy
+
+Primeiro, confirme no Coolify que `/health` está saudável. Em seguida, use a URL real atribuída pelo operador:
+
+```bash
+export BACKEND_PUBLIC_URL='https://endereco-real-configurado'
+curl --fail --show-error "$BACKEND_PUBLIC_URL/health"
+curl --fail --show-error -X POST "$BACKEND_PUBLIC_URL/api/chat" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Responda apenas: deploy funcionando"}'
+```
+
+O segundo teste comprova o fluxo Coolify -> `192.168.15.112:20128` -> OmniRoute -> modelo. Se falhar, verifique primeiro os logs da aplicação e a conectividade de saída do container, sem alterar redes globais ou o OmniRoute.
+
+### URL pública
+
+O `localtunnel` existente nesta homelab atende outro serviço na porta 3001 e usa `https://nflnba.loca.lt`. Ele não aponta para este backend e não deve ser substituído. Nenhuma URL pública foi atribuída ao backend. Depois do deploy, o operador deve configurar um domínio/túnel HTTPS aprovado para a aplicação sem interromper o túnel atual.

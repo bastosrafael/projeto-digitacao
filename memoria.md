@@ -190,3 +190,87 @@ sudo docker rm projeto-digitacao-backend-test
 - [x] Documentar a futura configuração do Coolify sem realizar deploy.
 - [x] Atualizar README e memória.
 - [x] Verificar Git e criar commit da Fase 3 (`feat: valida backend em container docker`).
+
+## 2026-08-08 — Fase 3B: GitHub e preparação do deploy no Coolify
+
+### GitHub
+
+- Auditoria pré-push concluída: `.gitignore` e `backend/.dockerignore` revisados.
+- Nenhum `.env`, token, senha, chave privada ou credencial foi encontrado nos arquivos versionados ou no histórico.
+- `backend/.env.example` é o único arquivo versionado com nome de ambiente; `OMNIROUTE_API_KEY` está declarada com valor vazio.
+- Remote: `origin https://github.com/bastosrafael/projeto-digitacao.git` para fetch e push.
+- Branch: `main`.
+- Primeira tentativa automatizada de push falhou corretamente por ausência de credencial HTTPS, com `fatal: unable to get password from user`; nenhum token foi criado, impresso ou armazenado.
+- O operador autenticou o GitHub fora do agente e executou `git push -u origin main` com sucesso.
+- Confirmação posterior: `origin/main` e `main` apontavam para `1b58f7d6beeb5425ca9285e189d60c4b4036bcc2`.
+
+### Coolify
+
+- Coolify local confirmado ativo em `http://192.168.15.112:8000`.
+- Health da API: `/api/health` e `/api/v1/health` retornaram HTTP 200.
+- Dashboard redireciona para `/login`.
+- Endpoints administrativos `/api/v1/projects` e `/api/v1/applications` retornaram HTTP 401 sem autenticação.
+- Nenhum token/API do Coolify estava disponível na sessão.
+- Credenciais internas do container não foram lidas nem reutilizadas; isso seria um contorno inseguro da autenticação.
+- Não existia aplicação ou container chamado `projeto-digitacao-backend`.
+- Deploy não realizado. Alvo manual preparado: projeto `projeto-digitacao`, aplicação `projeto-digitacao-backend`, fonte GitHub, repositório `bastosrafael/projeto-digitacao`, branch `main`, build Dockerfile, base `/backend`, Dockerfile `Dockerfile`, porta interna 8000 e health check `/health`.
+- Variáveis a configurar somente por nome no Coolify: `OMNIROUTE_BASE_URL`, `OMNIROUTE_API_KEY`, `OMNIROUTE_MODEL`.
+
+### Rede e OmniRoute
+
+- O OmniRoute permanece acessível na LAN em `http://192.168.15.112:20128` e não foi alterado.
+- A conectividade de um container Docker comum para o OmniRoute foi comprovada na Fase 3.
+- Coolify -> OmniRoute não pôde ser validado nesta etapa porque a aplicação Coolify ainda não foi criada.
+- Após o deploy manual, o teste crítico será `POST /api/chat`; ele deve retornar HTTP 200 antes de considerar o deploy concluído.
+
+### Túnel e acesso externo
+
+- Existe container `localtunnel` em rede host executando `lt --port 3001 --subdomain nflnba`.
+- URL observada: `https://nflnba.loca.lt`.
+- Esse túnel atende outro serviço na porta 3001 e não foi alterado, reiniciado ou reaproveitado.
+- Nenhuma URL pública está configurada para o backend.
+- `GET /health` externo e `POST /api/chat` externo não foram executados por inexistência de deploy e URL do backend; nenhum domínio foi inventado.
+
+### Testes
+
+- Testes automatizados executados novamente: `3 passed in 0.81s`.
+- Nenhum teste válido foi removido ou alterado.
+
+### Problemas, diagnósticos e soluções
+
+- Problema: primeira tentativa de push sem autenticação GitHub.
+- Diagnóstico: remote correto, mas nenhuma credencial HTTPS estava disponível.
+- Solução: operador autenticou externamente e realizou o push sem colocar token no repositório ou na URL.
+- Problema: ausência de credencial/API segura do Coolify na sessão.
+- Diagnóstico: health público funciona, mas endpoints administrativos exigem autenticação HTTP 401.
+- Solução: não contornar autenticação; documentar criação manual no dashboard.
+- Problema: túnel existente já pertence a outro serviço.
+- Diagnóstico: container `localtunnel` aponta a URL `https://nflnba.loca.lt` para a porta 3001.
+- Solução: preservar o túnel e deixar a URL pública do backend pendente para decisão/configuração do operador.
+
+### Arquivos modificados
+
+- `README.md`: arquitetura, GitHub, roteiro manual do Coolify, validação e situação do túnel.
+- `memoria.md`: registro integral da Fase 3B.
+
+### Próximo passo
+
+- Operador deve criar a aplicação no dashboard do Coolify seguindo o `README.md`, configurar as três variáveis, realizar o deploy e fornecer a URL real. Depois, validar `/health`, `/api/chat` e Coolify -> OmniRoute antes de iniciar a Fase 4.
+
+### Checklist da Fase 3B
+
+- [x] Ler memória, README e estado Git antes de agir.
+- [x] Auditar arquivos e histórico contra secrets.
+- [x] Configurar exclusivamente o remote GitHub autorizado.
+- [x] Publicar o histórico existente em `origin/main`.
+- [x] Revisar Dockerfile, porta interna 8000 e health check `/health`.
+- [x] Inspecionar Coolify e túnel existentes sem alterar infraestrutura.
+- [x] Confirmar que o Coolify exige autenticação administrativa.
+- [x] Preparar instruções manuais exatas para o dashboard.
+- [x] Preservar o localtunnel existente da porta 3001.
+- [x] Executar testes automatizados.
+- [x] Atualizar README e memória.
+- [ ] Deploy Coolify (pendente de autenticação/operador).
+- [ ] Validar Coolify -> OmniRoute (pendente do deploy).
+- [ ] Configurar e validar URL HTTPS externa (pendente de decisão do operador).
+- [x] Criar commit final e fazer push (`chore: prepara deploy do backend no coolify`).
