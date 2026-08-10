@@ -33,6 +33,12 @@ O navegador usa somente `/api/chat`. Durante o desenvolvimento na HOMELAB, o Vit
 
 Uploads não passam pela Netlify Function: o navegador envia `multipart/form-data` diretamente ao endpoint público do FastAPI no Funnel. Assim, o timeout de 25 segundos do proxy de chat não é reutilizado para arquivos grandes.
 
+## Fase 6A — infraestrutura de pesquisa real
+
+O HOMELAB possui um SearXNG self-hosted em Docker, acessível somente em `http://127.0.0.1:8888`, com saída HTML/JSON e quatro engines gratuitas ativas: DuckDuckGo, Brave, Qwant e Mojeek. O OmniRoute 3.8.49 possui a conexão `searxng-search` apontando para esse endereço e o `POST /v1/search` foi validado com resultados e URLs reais, sem API comercial e sem usar LLM como mecanismo de busca.
+
+Esta infraestrutura ainda não está integrada ao backend do Projeto Digitação. Essa integração, incluindo consultas por produto, evidências e cache, pertence à Fase 6B. O frontend permanece inalterado.
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
@@ -140,12 +146,14 @@ A interface da Fase 4 está congelada. O commit visual é `fc53ebb`, marcado pel
 
 ## Upload XLSX
 
-A etapa inicial de upload aceita somente `.xlsx`. Ela armazena o arquivo, valida a estrutura mínima do workbook e retorna os metadados do upload. Ainda não interpreta produtos, lê linhas ou extrai imagens.
+O upload aceita somente `.xlsx`, valida a estrutura mínima do workbook, armazena o arquivo e retorna seus metadados. A análise de produtos e imagens é feita separadamente pelo leitor universal da Fase 5B.
 
 Endpoints:
 
 - `GET /api/uploads/config`: informa o limite configurado e extensões aceitas;
 - `POST /api/uploads`: recebe o campo multipart `file`, retorna HTTP 201 e um `file_id` UUID;
+- `GET /api/uploads/{file_id}`: consulta os metadados persistidos de um upload novo;
+- `POST /api/uploads/{file_id}/analyze`: analisa um XLSX já armazenado;
 - arquivo acima do limite: HTTP 413 com detalhe sanitizado;
 - extensão ou estrutura XLSX inválida: HTTP 400 e remoção do arquivo parcial.
 
@@ -159,7 +167,9 @@ CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app
 
 O frontend consulta `/api/uploads/config` antes da seleção. Ele mostra nome e tamanho, permite remover pelo mesmo clipe antes do envio, rejeita antecipadamente arquivos acima do limite para melhorar a experiência e envia o `File` por `FormData`, sem Base64 e sem armazenar seu conteúdo no `localStorage`. Os estados técnicos são `selected`, `uploading`, `uploaded` e `error`. A validação definitiva permanece no backend.
 
-O backend lê o `UploadFile` em chunks de 1 MiB, conta os bytes e grava primeiro em `.part`. Se ocorrer erro ou o limite for ultrapassado, remove o parcial. Depois valida extensão, ZIP e as partes mínimas `[Content_Types].xml`, `_rels/.rels` e `xl/workbook.xml`; somente então renomeia atomicamente para `<UUID>.xlsx` com modo 600. O nome original é sanitizado e mantido apenas como metadado; nunca compõe o caminho físico. O arquivo não é enviado ao OmniRoute.
+O backend lê o `UploadFile` em chunks de 1 MiB, conta os bytes, calcula SHA-256 no mesmo fluxo e grava primeiro em `.part`. Se ocorrer erro ou o limite for ultrapassado, remove os parciais. Depois valida extensão, ZIP e as partes mínimas `[Content_Types].xml`, `_rels/.rels` e `xl/workbook.xml`; somente então renomeia atomicamente para `<UUID>.xlsx` com modo 600.
+
+Uploads novos também recebem `<UUID>.json`, igualmente privado e gravado de forma atômica, contendo versão do esquema, nome original sanitizado, nome armazenado, tamanho, SHA-256 e horário UTC. O nome original nunca compõe um caminho físico. Se o sidecar falhar, o XLSX recém-gravado também é removido para não deixar estado incompleto. Uploads anteriores a essa melhoria continuam analisáveis, mas não ganham metadados retroativos automaticamente. O arquivo não é enviado ao OmniRoute.
 
 ### Storage persistente obrigatório no Coolify
 
@@ -211,12 +221,15 @@ Os módulos ficam em `backend/app/services/spreadsheets/`:
 - `normalization.py`: aliases em português, inglês e chinês, normalização de cabeçalhos/códigos e separação de texto logístico;
 - `schemas.py`: contratos normalizados de análise, produtos e imagens;
 - `analyzer.py`: escolha da aba principal, extração, agrupamento, associação imagem↔linha↔código e métricas.
+- `duimp_policy.py`: preparação determinística de termos de pesquisa e fatos ordenados para redação, sem executar busca, classificar NCM ou completar lacunas.
 
 A detecção de code/style reconhece títulos como `Style number`, `Code`, `Código`, `SKU`, `Model`, `款号` e `货号`. Sem título conhecido, pontua colunas por proporção e diversidade de valores compatíveis com códigos, rejeitando números sequenciais, quantidades e padrões de NCM. A resposta inclui confiança de 0 a 1.
 
 Códigos repetidos são agrupados em um produto lógico com `row_numbers`. O valor original permanece em `code_original`/`original_values`; intervalos de caixas são separados em `packing_info`. Sufixos semânticos que distinguem um item, inclusive texto chinês não logístico, são preservados. Quando não há código identificável, o parser usa `ROW-xxxxx`, `status=REVISAR` e o warning `Código não identificado`.
 
 As imagens são contadas por âncora, não apenas por arquivo em `xl/media`, porque uma mesma mídia pode aparecer várias vezes. Cada instância registra aba, linha/coluna de âncora, dimensões, referência OOXML e SHA-256. A coluna/cabeçalho classifica `PRODUCT_IMAGE`, `LABEL_IMAGE`, `WASH_LABEL`, `HANGTAG` ou `OTHER`; a associação ao produto usa linha lógica, merges, continuidade documental e proximidade controlada.
+
+Quando existirem colunas correspondentes, o leitor também preserva finalidade, dimensões, peso, capacidade, tensão, potência, frequência, bateria, recarga, conexão e acessórios. Cada produto recebe `research_preparation`, com consultas formadas apenas por evidências da planilha, e `description_preparation`, com fatos comprovados na ordem recomendada para redação. Esses blocos são preparação: não indicam pesquisa web executada e não constituem classificação ou descrição DUIMP final. A política completa está em `docs/POLITICA_PESQUISA_DUIMP.md`.
 
 ### Casos reais de aceitação
 
@@ -246,7 +259,7 @@ Limitações deliberadas desta fase:
 - imagens em colunas desconhecidas ficam como `OTHER`;
 - fórmulas usam o valor cached existente no XLSX;
 - arquivos corrompidos ou sem tabela reconhecível retornam erro controlado;
-- a Fase 5A não persistia o filename original em banco/sidecar; os dois uploads existentes foram relacionados por logs, tamanho, horário e estrutura interna;
+- os uploads históricos da Fase 5A não possuem sidecar; uploads novos preservam nome original sanitizado, tamanho, SHA-256 e horário UTC em JSON associado ao UUID;
 - não há pesquisa web, chamada ao OmniRoute, descrição comercial ou descrição DUIMP.
 
 **FASE 5B = CONCLUÍDA.** O commit funcional `2a60c14` foi implantado no Coolify pelo deployment `qmhtkfjr44k2gdzhxg520vxt`. O novo container ficou healthy, preservou o mount RW e os dois uploads reais retornaram HTTP 200 no endpoint de análise local e público. A Fase 5A e a UI aprovada continuam preservadas. A Fase 6 não foi iniciada.
@@ -373,7 +386,7 @@ CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app
 
 Se o OmniRoute local continuar sem exigir autenticação, `OMNIROUTE_API_KEY` pode permanecer vazia. A chave, quando necessária, deve existir somente como variável protegida do backend.
 
-A imagem `projeto-digitacao-backend:local` também foi construída e validada localmente. O frontend está publicado no Netlify; Excel ainda não faz parte do estado atual.
+A imagem `projeto-digitacao-backend:local` também foi construída e validada localmente. O frontend está publicado no Netlify e o fluxo de upload/análise de XLSX está implementado no backend.
 
 ### Validação do deploy
 

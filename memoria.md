@@ -1153,3 +1153,185 @@ Internet
 - A IA não pode afirmar que pesquisou a internet quando nenhuma busca real tiver sido executada. O modelo não é ferramenta de busca.
 - Priorizar fabricante, fornecedor e catálogo oficiais; depois distribuidor e loja especializada/confiável; marketplace somente como evidência secundária. Não inventar URLs, fabricantes ou composição.
 - Roadmap preservado: Fase 7 — análise visual e cruzamento de evidências; Fase 8 — descrição técnica objetiva para DUIMP; Fase 9 — planilha final para download.
+
+## 2026-08-10 — Preparação adicional antes da Fase 6
+
+### Memória revisada e oportunidade incorporada
+
+- O material disponível no workspace foi revisado antes de iniciar a Fase 6. A pasta Windows `C:\Users\basto\Desktop\projeto-digitacao\memorias` não estava montada no ambiente; o arquivo permanente disponível era `memoria.md`.
+- Foi corrigida a limitação registrada na Fase 5B: uploads novos agora persistem metadados ao lado do XLSX, evitando depender de logs, `mtime` e inspeção estrutural para recuperar o nome de origem.
+- O sidecar controlado `<UUID>.json` contém `schema_version`, `file_id`, nome original sanitizado, nome armazenado, tamanho em bytes, SHA-256 e horário UTC.
+- XLSX e sidecar usam somente nomes derivados de UUID, recebem modo 600 e são gravados por arquivos temporários com rename atômico. Falha no metadado remove também o XLSX novo e todos os parciais.
+- Criado `GET /api/uploads/{file_id}` para consultar a proveniência sem aceitar paths arbitrários. `POST /api/uploads/{file_id}/analyze` permanece compatível.
+- Uploads históricos continuam analisáveis e não são alterados automaticamente; apenas não possuem o novo sidecar até serem reenviados ou migrados com dados de origem confiáveis.
+- O `POST /api/uploads` passou a retornar também `sha256` e `uploaded_at`, sem remover campos anteriores e sem alterar o frontend visual aprovado.
+
+### Validação
+
+- Suíte backend: 26 testes passando.
+- Cobertos: conteúdo e permissão do sidecar, hash do XLSX, consulta por UUID, rejeição de identificador inválido, remoção integral quando a gravação do metadado falha e regressões de upload/análise/chat.
+- `git diff --check` sem erros.
+- **FASE 6 CONTINUA NÃO INICIADA.** Esta mudança apenas fortalece rastreabilidade e proveniência para a próxima fase.
+
+## 2026-08-10 — Incorporação das memórias DUIMP de Shirley
+
+### Fontes revisadas
+
+- Lidos integralmente os dois Markdown e o PDF em `/home/rb/Compartilhado/Backup-D/memorias-shirley`.
+- O PDF repete a memória geral; o segundo Markdown amplia exemplos e ressalvas.
+- Os casos e NCMs históricos não foram convertidos em regras automáticas. As próprias memórias determinam análise individual, registram dados incompletos e alertam sobre classificações discutíveis.
+
+### Conteúdo incorporado
+
+- Criada a política canônica `docs/POLITICA_PESQUISA_DUIMP.md`, limitada a critérios reutilizáveis de pesquisa, evidência e redação neutra.
+- O parser passou a reconhecer cabeçalhos em português, inglês e chinês para finalidade, dimensões, peso, capacidade, tensão, potência, frequência, bateria, recarga, conexão e acessórios.
+- Produtos normalizados agora incluem `research_preparation`: consultas determinísticas, termos originados na planilha, foco técnico por categoria, lacunas e avisos.
+- Produtos normalizados também incluem `description_preparation`: somente fatos comprovados, ordenados segundo a política DUIMP, sem preencher campos ausentes.
+- A NCM da planilha pode compor a pesquisa, mas recebe aviso explícito de que não confirma a classificação. Ela permanece fora do texto descritivo automático e em campo próprio.
+- Nenhuma URL, fonte, composição, material, fabricante, modelo ou NCM é inventada. Nenhuma lista histórica foi usada como lookup.
+- A interface aprovada permaneceu inalterada. Nenhuma pesquisa web foi executada e nenhuma descrição DUIMP final foi gerada nesta preparação.
+
+### Validação
+
+- Suíte backend ampliada para 32 testes, incluindo aliases técnicos em português/inglês/chinês, preparação de pesquisa, separação da NCM e garantia de não preencher lacunas.
+- Os dois XLSX reais não puderam ser reabertos pelo usuário da sessão porque permanecem com modo 600 e propriedade do container/root; não houve alteração de permissões nem dos arquivos persistentes. Os testes sintéticos equivalentes passaram.
+- **FASE 6 AINDA NÃO EXECUTOU PESQUISA REAL.** O projeto apenas ganhou entradas estruturadas e política para fazê-la com rastreabilidade na próxima etapa.
+
+## 2026-08-10 — FASE 6A — SEARCH INFRASTRUCTURE
+
+### Instalação do SearXNG
+
+- SearXNG self-hosted instalado fora do projeto, em `/opt/searxng`, por Docker Compose com um único container e sem Valkey/Redis.
+- Imagem oficial fixada em `searxng/searxng:2026.8.10-0a118066d`, digest `sha256:cd22dbf7fac8b25d5e39e65af53a4b47009df5ad3162e270c477fd5b30ce03f2`.
+- Publicação restrita a `127.0.0.1:8888 -> 8080/tcp`; o serviço não responde em `192.168.15.112:8888` e não possui Funnel, proxy público ou exposição para a LAN.
+- Restart policy `unless-stopped`, limite de memória de 512 MiB, limite de 1 CPU e um worker Granian.
+- `secret_key` forte gerada localmente e mantida somente em `/opt/searxng/.env`, modo 600. O valor não foi registrado nem versionado.
+- Formatos `html` e `json` habilitados. Limiter e image proxy desativados; como a instância é local, Valkey não é necessário neste cenário.
+- Engines efetivamente ativas e sem API paga: DuckDuckGo, Brave, Qwant e Mojeek. A engine Google foi descartada da configuração final porque vem marcada como `inactive` nesta versão.
+
+### Validação direta
+
+- Homepage local: HTTP 200.
+- `GET /search?q=OpenAI&format=json`: HTTP 200, JSON válido, 26 resultados no teste inicial, com `title`, `url` e `content`; latência observada de 1,37 s.
+- Consulta controlada de produto: código real `WW77#`, obtido pelo parser do Packing List `c21b5d16-d31f-4722-8c3b-213d19360be3`; HTTP 200, 10 resultados e URLs, em 1,20 s.
+- Brave e DuckDuckGo forneceram resultados na consulta inicial. Mojeek apresentou uma falha pontual de upstream; a redundância permaneceu configurada e o serviço continuou respondendo normalmente.
+- O código isolado retornou ao menos um resultado coerente, mas também ruído e spam. Filtragem, composição de consultas e avaliação de evidências ficam explicitamente para a Fase 6B.
+
+### OmniRoute Search Gateway
+
+- OmniRoute preservado na versão 3.8.49 e porta 20128.
+- Criada somente a conexão `searxng-search`, nome `SearXNG HOMELAB`, `auth_type=none`, ativa, sem API key/token, sem proxy e com `baseUrl=http://127.0.0.1:8888`.
+- Antes da persistência foi criado o backup local `omniroute-backup-pre-searxng-search-provider`. Como o endpoint administrativo recusou escrita sem uma sessão de administrador válida, a linha sem credencial foi inserida transacionalmente no schema `provider_connections`; a contagem dos três providers LLM preexistentes permaneceu inalterada.
+- `POST /v1/search` com `provider=searxng-search`, consulta `OpenAI` e `max_results=5`: HTTP 200, 5 resultados reais, 1.130 ms de upstream, `search_cost_usd=0`, sem erros.
+- `POST /v1/search` com `provider=searxng-search`, consulta `WW77#` e `max_results=5`: HTTP 200, 5 resultados reais, 1.536 ms de upstream, `search_cost_usd=0`, sem erros.
+- Depois de `docker restart searxng`, o JSON direto voltou a responder e uma consulta não cacheada pelo OmniRoute retornou HTTP 200, 5 resultados, 829 ms de upstream e custo zero.
+- Nenhuma API comercial foi criada, contratada ou utilizada. `duckduckgo-free` permanece apenas como fallback possível e não foi configurado como provider principal.
+
+### Recursos, segurança e preservação
+
+- Medição final em idle: SearXNG com 134,5 MiB de RAM de um limite de 512 MiB, 0,00% de CPU e 12 PIDs/threads; um único processo worker foi confirmado.
+- Host: 3,6 GiB de RAM total, 3,0 GiB em uso, 614 MiB disponíveis; swap 1,8 GiB de 5,6 GiB; CPU do container em 0% e host com aproximadamente 88% idle na amostra.
+- Docker reportou imagem de 377 MB e camada gravável do container de 496 KB. O filesystem raiz permaneceu com aproximadamente 33 GiB livres.
+- `ss -ltnp` confirmou somente `127.0.0.1:8888`; não existe bind `0.0.0.0:8888`.
+- Projeto Digitação permaneceu saudável em `127.0.0.1:18001`; NFLNBA permaneceu saudável em `127.0.0.1:3001`.
+- Tailscale Funnel permaneceu sem mudanças: 443 aponta para NFLNBA/3001 e 8443 para Projeto Digitação/18001. Nenhum Funnel foi criado para o SearXNG.
+- Nenhum arquivo de backend ou frontend foi alterado pela Fase 6A. A UI continua LOCKED no commit visual `fc53ebb`.
+
+### Regra arquitetural e próximo passo
+
+- Pesquisa real e análise permanecem camadas independentes: SearXNG executa a busca; OmniRoute `/v1/search` entrega resultados e URLs; os modelos gratuitos `auto/coding:free` poderão analisar evidências posteriormente.
+- LLM não é mecanismo de pesquisa e não pode alegar busca sem resultados reais do Search Gateway.
+- **FASE 6A = CONCLUÍDA.** Infraestrutura de pesquisa real, local e de custo zero validada; a Fase 6B não foi iniciada.
+- **FASE 6B — INTEGRAÇÃO DA PESQUISA COM PRODUTOS:** produto estruturado da Fase 5B -> geração de consultas -> OmniRoute `/v1/search` -> SearXNG -> resultados reais -> evidências -> cache -> posteriormente IA gratuita.
+
+## 2026-08-10 — Checkpoint final do dia após a Fase 6A
+
+### Estado encerrado
+
+- **FASE 5A = CONCLUÍDA.** Upload XLSX e storage persistente permanecem funcionando em produção.
+- **FASE 5B = CONCLUÍDA.** O leitor universal de Packing List permanece validado com os dois modelos reais.
+- **FASE 6A = CONCLUÍDA.** A infraestrutura gratuita de pesquisa real foi instalada, conectada ao OmniRoute e validada.
+- **FASE 6B = NÃO INICIADA.** Este checkpoint não adicionou integração de pesquisa ao backend, pesquisa em lote, análise por IA ou descrição DUIMP.
+
+### Fase 5B preservada
+
+- `IM0416-26 - PACKING LIST.xlsx`, `file_id=fe9759e7-be2c-4808-92ae-cf395e9bd376`: 71 produtos únicos e 88 imagens — 64 `PRODUCT_IMAGE`, 16 `HANGTAG` e 8 `OTHER`.
+- `IM0342-26 - PACKING LIST com fob.xlsx`, `file_id=c21b5d16-d31f-4722-8c3b-213d19360be3`: 74 produtos únicos e 155 imagens — 109 `PRODUCT_IMAGE`, 36 `WASH_LABEL` e 10 `HANGTAG`.
+- O parser detecta abas, cabeçalhos multilíngues e multilinha, Style/Code por aliases ou inferência, anchors e merges; relaciona imagem ↔ linha ↔ código, normaliza códigos, agrupa produtos repetidos, preserva valores originais, classifica imagens e não depende do filename.
+- A classificação de imagens continua estrutural; não existe OCR ou análise visual por IA nesta etapa.
+
+### Infraestrutura atual de pesquisa
+
+- SearXNG instalado por Docker Compose em `/opt/searxng/compose.yaml`, imagem `searxng/searxng:2026.8.10-0a118066d`, sem containers auxiliares e sem Valkey/Redis.
+- Bind exclusivo `127.0.0.1:8888 -> container:8080`; não existe `0.0.0.0:8888`, exposição para LAN/internet ou Tailscale Funnel.
+- HTML e JSON habilitados. `GET /search?...&format=json` retornou HTTP 200 com `title`, URL e conteúdo/snippet reais.
+- Engines gratuitas ativas: DuckDuckGo, Brave, Qwant e Mojeek. Nenhuma API comercial, conta paga ou cartão foi utilizado.
+- OmniRoute 3.8.49 preservado na porta 20128, com Search Gateway `POST /v1/search` e provider ativo `searxng-search`, autenticação `none`, sem API key e custo observado de US$ 0.
+
+### Testes consolidados da Fase 6A
+
+- SearXNG direto, consulta `OpenAI`: aproximadamente 26 resultados em 1,37 s.
+- SearXNG direto, consulta real de produto `WW77#`: aproximadamente 10 resultados em 1,20 s.
+- OmniRoute `POST /v1/search`, `provider=searxng-search`, consulta `OpenAI`, `max_results=5`: 5 resultados reais, upstream aproximado de 1.130 ms e custo US$ 0.
+- OmniRoute `POST /v1/search`, `provider=searxng-search`, consulta `WW77#`, `max_results=5`: 5 resultados reais, upstream aproximado de 1.536 ms e custo US$ 0.
+- Depois de `docker restart searxng`, o JSON direto, o Search Gateway e uma pesquisa não cacheada continuaram funcionando.
+
+### Limitação observada
+
+- A consulta somente pelo código `WW77#` também retornou ruído, spam e páginas sem relação suficiente com o produto.
+- Isso não invalida a infraestrutura: comprova que a Fase 6B precisa combinar código e dados da planilha, normalizar e deduplicar resultados, filtrar spam, aplicar scoring, priorizar fontes, armazenar evidências e usar cache.
+- Não pesquisar centenas de combinações indiscriminadamente nem processar os aproximadamente 145 produtos de uma vez.
+
+### Recursos e alerta operacional
+
+- SearXNG observado com aproximadamente 134,5 MiB de RAM, limite de 512 MiB e CPU próxima de 0% em idle.
+- Host observado com aproximadamente 3,6 GiB de RAM total, 3,0 GiB usados, 614 MiB disponíveis e 1,8 GiB de swap usados de 5,6 GiB; CPU do host aproximadamente 88% idle.
+- Imagem SearXNG aproximadamente 377 MB; filesystem do host com aproximadamente 33 GiB livres.
+- A RAM do HOMELAB permanece limitada. Antes de qualquer piloto da Fase 6B, executar novamente `free -h` e `docker stats --no-stream`.
+- A Fase 6B deverá começar com concorrência baixa, poucas pesquisas e cache desde o início.
+
+### Arquitetura preservada
+
+```text
+Packing List
+  -> upload
+  -> leitor universal da Fase 5B
+  -> produto estruturado
+
+Pesquisa futura:
+produto
+  -> backend do Projeto Digitação
+  -> OmniRoute /v1/search
+  -> provider searxng-search
+  -> SearXNG
+  -> internet real
+  -> URLs + títulos + snippets
+
+IA futura:
+resultados reais + dados da planilha
+  -> OmniRoute
+  -> auto/coding:free
+  -> comparação e resumo de evidências
+```
+
+> **REGRA CRÍTICA: A IA NÃO É O MECANISMO DE BUSCA.** A IA somente poderá analisar resultados depois que o backend executar uma busca real pelo OmniRoute `/v1/search` e SearXNG. Nunca permitir que um modelo afirme “pesquisei na internet” sem essa execução real.
+
+### Próximo passo exato — Fase 6B
+
+- Iniciar amanhã a **FASE 6B — INTEGRAÇÃO DE PESQUISA COM PRODUTOS**, sem começar por todos os produtos.
+- Selecionar primeiro somente 2 ou 3 produtos reais com code/style conhecido e, preferencialmente, `item_name`, NCM, composição ou outros sinais auxiliares.
+- Gerar poucas consultas controladas, combinando quando disponível: código exato; código + `item_name`; código + fornecedor; código + tipo de produto; código + composição.
+- Fluxo: produto estruturado -> consultas -> OmniRoute `/v1/search` -> SearXNG -> resultados reais -> normalização -> deduplicação -> filtragem de ruído/spam -> scoring -> priorização de fontes -> evidências -> cache -> posteriormente IA gratuita.
+- Prioridade de fontes: fabricante; fornecedor oficial; catálogo oficial; distribuidor confiável; loja especializada; marketplace apenas como fonte secundária. Spam, SEO farms, agregadores ruins e páginas irrelevantes devem perder pontuação ou ser descartados.
+- Cache mínimo por query normalizada e provider, guardando timestamp, resultados e status, para não repetir sem necessidade consultas como `WW77#`.
+- Para cada evidência relevante preservar: título, URL, snippet, provider, posição, data da consulta, query utilizada, score futuro e motivo de relevância quando disponível. Nunca inventar URL.
+- Somente depois da busca estruturada, resultados reais e dados da planilha poderão ser enviados a `auto/coding:free` para comparar, classificar e resumir evidências, sem inventar fonte, composição, fabricante ou fato técnico.
+
+### Infraestrutura bloqueada para alterações neste checkpoint
+
+- Frontend `https://projeto-digitacao.netlify.app` e UI **LOCKED** no commit visual `fc53ebb`.
+- Backend local `http://127.0.0.1:18001` e público `https://nflnba.tail08f125.ts.net:8443`.
+- Tailscale Funnel preservado: 443 -> NFLNBA e 8443 -> Projeto Digitação.
+- Storage RW preservado: host `/opt/projeto-digitacao/data/uploads` -> container `/data/uploads`.
+- SearXNG preservado em `127.0.0.1:8888`; OmniRoute preservado na porta 20128.
+- Fases futuras permanecem: Fase 7 — análise visual e cruzamento de evidências; Fase 8 — descrição técnica objetiva para DUIMP; Fase 9 — Excel final para download.
