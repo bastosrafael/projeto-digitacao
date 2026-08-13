@@ -1478,3 +1478,41 @@ resultados reais + dados da planilha
 - Teste público de produção em `POST /api/uploads/{file_id}/research`, somente com `WY-2026-Y13` e `N260308#`: HTTP 200, provider `searxng-search`, 6 consultas, 6 misses/6 chamadas na primeira execução, zero evidências falsas e ambos `NÃO_ENCONTRADO`.
 - Replay público: HTTP 200, 6 cache hits, zero misses, zero chamadas ao gateway, mesmos resultados e `llm_used=false`.
 - Não houve lote, fetch de páginas, IA, visão, tradução por IA ou geração de descrição DUIMP.
+
+## 2026-08-13 — Fase 6B.3: enriquecimento controlado de evidências
+
+### Arquitetura e segurança
+
+- Criado o endpoint complementar `POST /api/uploads/{file_id}/research/enrich`; o contrato de `/research` permaneceu intacto. A rota aceita somente 2 ou 3 produtos, executa o search existente e entrega ao fetcher no máximo três evidências `STRONG`/`MODERATE` por produto.
+- Resultados `WEAK`, spam, query echo, domínio bloqueado, descartados ou produtos `NÃO_ENCONTRADO` nunca chegam ao cliente HTTP. O processamento é estritamente sequencial e não segue links da página.
+- O cliente aceita apenas HTTP/HTTPS nas portas padrão, rejeita credenciais embutidas e valida DNS/IP antes da requisição e novamente em cada redirect. Localhost, loopback, RFC1918, link-local, metadata, IP não global e sufixos internos são bloqueados como `SSRF_BLOCKED`; TLS não é desativado.
+- Redirects são manuais e limitados a três. User-Agent é identificável, timeout padrão é 15 s e logs contêm somente domínio, status, bytes e tipo de erro, sem query string ou conteúdo.
+- Limite padrão: 3 MiB de HTML descomprimido, verificado por `Content-Length` e durante streaming. São aceitos somente `text/html` e `application/xhtml+xml`; gzip e Brotli são tratados pelo `httpx` com dependência Brotli explícita. PDF, imagem, ZIP, executável e outros binários ficam `UNSUPPORTED_CONTENT`.
+- Estados: `OK`, `BLOCKED`, `TIMEOUT`, `TOO_LARGE`, `UNSUPPORTED_CONTENT`, `HTTP_ERROR`, `SSRF_BLOCKED` e `PARSE_ERROR`.
+
+### Extração, matching e cache
+
+- Parser determinístico baseado em biblioteca padrão remove scripts, estilos, navegação, menus, banners/cookies, formulários, aside e footer. Preserva título, meta description, H1/H2, texto principal/tabelas simples e trecho de até 4.000 caracteres; HTML completo nunca é devolvido.
+- JSON-LD é inspecionado para `Product`, `Offer`, `Brand` e `Organization`, preservando `name`, `sku`, `mpn`, `brand`, `manufacturer`, `model`, `description`, `material`, `color`, `category`, GTIN, URL e offers quando existentes. JSON-LD é tratado como evidência da fonte, não como verdade automática.
+- O matching compara deterministicamente code/style, item name, fabricante, marca, composição, construção e NCM. A resposta preserva sinais encontrados/ausentes, fatos da planilha e fatos web com origem explícita e conflitos sem escolher silenciosamente um valor.
+- O conteúdo HTML descomprimido recebe SHA-256. O cache separado fica em `/data/uploads/.fetch-cache`, usa URL canonicalizada + parser `web-evidence-v1`, TTL de sete dias, arquivos modo 600 e estados `HIT`, `MISS` e `EXPIRED`. Respostas `BLOCKED`, `TOO_LARGE` e `UNSUPPORTED_CONTENT` também são cacheadas para evitar insistência.
+
+### Piloto real controlado
+
+- Controle `Raspberry Pi 5`: search reutilizou 3 cache hits, zero chamadas ao gateway e ofereceu 11 evidências aprovadas; somente as três melhores foram buscadas.
+- `https://www.raspberrypi.com/products/raspberry-pi-5/`: HTTP 403, 1.190 ms na primeira amostra e depois ~199 ms, status `BLOCKED`; nenhuma tentativa de contorno.
+- `https://www.robocore.net/placa-raspberry-pi/raspberry-pi-5-8gb`: HTTP 200, `text/html`, 184.979 bytes, ~2.255 ms; título, meta description, H1/H2 e sinais `code`, `item_name`, `manufacturer` e `brand` encontrados.
+- `http://geekworm.com/collections/raspberry-pi/Raspberry-Pi-5`: redirect seguro para HTTPS, HTTP 200, `text/html`, 1.065.915 bytes, ~1.806 ms; título/meta e os mesmos quatro sinais encontrados.
+- Nenhuma das duas páginas reais processadas expôs JSON-LD útil ao parser. A fixture sintética comprovou extração de JSON-LD Product com SKU, MPN, model, brand, manufacturer, material, color e category.
+- Não houve conflito no controle positivo real. Fixture determinística comprovou preservação do conflito `composition`: Packing List `100% polyester` versus web `100% cotton`, com as duas origens.
+- Replay final: 3 fetch cache hits e zero requisições de rede, inclusive para a página oficial bloqueada. Cache ocupa aproximadamente 20 KiB em três arquivos privados e ignorados pelo Git.
+- `WY-2026-Y13` e `N260308#`: oito search cache hits, zero gateway calls, ambos `NÃO_ENCONTRADO`, zero URLs aprovadas e zero fetches. A imagem Docker local também validou o endpoint com esses dois produtos: HTTP 200, seis search cache hits, zero gateway calls e zero fetches.
+
+### Validação e gate local
+
+- 67 testes backend passaram. Cobertura inclui HTML/meta/headings, JSON-LD Product, SKU, fabricante, material, gzip/Brotli, redirect seguro, redirect para IP privado, localhost/RFC1918/metadata/esquemas, DNS privado, limite por header/stream, MIME inválido, timeout, cache hit/expired/BLOCKED, conflito e limite/seleção de URLs aprovadas.
+- `compileall`, `pip check`, build Docker Python 3.12 e `git diff --check` passaram. Imagem local: 70.762.133 bytes.
+- Recursos após o piloto: host com aproximadamente 734 MiB disponíveis e 3,4 GiB de swap livre; backend de produção anterior em ~44 MiB e SearXNG dentro do limite de 512 MiB. Nenhum serviço adicional foi instalado.
+- `llm_used=false`; nenhuma chamada LLM, IA visual, DUIMP, browser headless, Firecrawl/Jina ou processamento em lote ocorreu.
+- **GATE LOCAL 6B.3 ATENDIDO.** Commit/deploy e validação do endpoint em produção ainda dependem da auditoria Git final desta execução.
+- Próxima etapa após produção saudável: decidir a integração das IAs gratuitas do OmniRoute para analisar exclusivamente Packing List + search real + conteúdo real + evidências estruturadas. Essa integração não foi iniciada.

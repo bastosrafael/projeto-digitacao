@@ -59,6 +59,16 @@ O diagnóstico direto do SearXNG mostrou Brave suspenso por excesso de requisiç
 
 Na recuperação da base gratuita, Bing Web, Mwmbl e Wiby foram validadas e passaram a formar o conjunto ativo. O controle positivo `Raspberry Pi 5`, processado sem exceções pelo mesmo pipeline, reteve a página do produto em `raspberrypi.com` como evidência `STRONG`. Em contraste, os Styles dos Packing Lists continuaram corretamente como `NÃO_ENCONTRADO` quando só havia páginas desconexas. Esse contraste valida a camada determinística de busca, filtro e evidência sem IA; fetch de páginas e enriquecimento permanecem para a Fase 6B.3.
 
+### Fase 6B.3 — enriquecimento controlado
+
+O endpoint complementar `POST /api/uploads/{file_id}/research/enrich` preserva o contrato de pesquisa existente e adiciona fetch somente para evidências `STRONG` ou `MODERATE`, limitado a três páginas por produto. Produtos `NÃO_ENCONTRADO` e resultados `WEAK`, spam, query echo ou bloqueados pelo filtro não geram requisição de página.
+
+O fetcher aceita somente HTTP/HTTPS nas portas padrão, valida DNS/IP antes de cada requisição e depois de cada redirect e bloqueia localhost, redes privadas, link-local, metadata e demais endereços não públicos. TLS permanece validado, redirects são manuais e limitados a três, timeout é explícito e o corpo HTML descomprimido é limitado a 3 MiB. Somente `text/html` e `application/xhtml+xml` são processados; PDFs, imagens e binários não são interpretados.
+
+A extração determinística remove scripts, estilos, navegação, menus, banners de cookies e rodapés. A API retorna somente título, meta description, H1/H2, trecho textual limitado, JSON-LD útil (`Product`, `Offer`, `Brand` e `Organization`), hash SHA-256, sinais encontrados/ausentes, fatos com origem e conflitos entre Packing List e web. HTML completo nunca é devolvido.
+
+O cache de fetch é separado do cache de search, usa parser versionado, URL canonicalizada, arquivos privados e TTL de sete dias em `/data/uploads/.fetch-cache`. Estados explícitos incluem `OK`, `BLOCKED`, `TIMEOUT`, `TOO_LARGE`, `UNSUPPORTED_CONTENT`, `HTTP_ERROR`, `SSRF_BLOCKED` e `PARSE_ERROR`. Todo processamento permanece sequencial e declara `llm_used=false`.
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
@@ -331,6 +341,10 @@ cd /opt/projeto-digitacao/backend
 - `SEARCH_PROVIDER`: provider explícito do Search Gateway (padrão `searxng-search`).
 - `SEARCH_CACHE_DIR`: cache privado persistente (padrão `/data/uploads/.search-cache`).
 - `SEARCH_CACHE_TTL_SECONDS`: validade do cache em segundos (padrão sete dias).
+- `FETCH_CACHE_DIR`: cache privado de páginas aprovadas (padrão `/data/uploads/.fetch-cache`).
+- `FETCH_CACHE_TTL_SECONDS`: validade do cache de fetch (padrão sete dias).
+- `FETCH_TIMEOUT_SECONDS`: timeout por página (padrão 15 segundos).
+- `FETCH_MAX_BYTES`: limite do HTML descomprimido por página (padrão 3 MiB).
 - `LOG_LEVEL`: nível de log.
 
 O cliente HTTP não segue redirecionamentos, aplica timeout, retry limitado para falhas transitórias e nunca registra a chave nos logs.

@@ -10,8 +10,9 @@ from openpyxl import Workbook
 from app.config import Settings, get_settings
 from app.main import app
 from app.services.duimp_policy import prepare_product
+from app.services.research.enrichment import EvidenceEnrichmentService
 from app.services.research.filtering import canonical_url, evaluate_result, score_result
-from app.services.research.schemas import ResearchResponse
+from app.services.research.schemas import EnrichmentResponse, ResearchResponse
 from app.services.research.selection import select_rich_products
 from app.services.research.service import ProductResearchService
 from app.services.spreadsheets.schemas import Product
@@ -303,3 +304,61 @@ def test_research_endpoint_runs_two_products_and_keeps_llm_disabled(
     assert response.json()["llm_used"] is False
     assert captured["ids"] == ["ONE-1", "TWO-2"]
     assert captured["options"]["max_queries_per_product"] == 4
+
+
+def test_enrichment_endpoint_preserves_research_contract_and_limits_pages(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    file_id = str(uuid4())
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Code", "Item name"])
+    sheet.append(["ONE-1", "Produto um"])
+    sheet.append(["TWO-2", "Produto dois"])
+    workbook.save(tmp_path / f"{file_id}.xlsx")
+    workbook.close()
+    settings = Settings(
+        upload_dir=tmp_path,
+        search_cache_dir=tmp_path / "search-cache",
+        fetch_cache_dir=tmp_path / "fetch-cache",
+    )
+    captured = {}
+
+    async def fake_research(self, requested_file_id, products, **options):
+        captured["research_ids"] = [product.product_id for product in products]
+        return ResearchResponse(
+            file_id=requested_file_id, provider="searxng-search",
+            researched_at="2026-08-13T18:29:09Z", products=[], query_count=0,
+            gateway_calls=0, cache_hits=0, cache_misses=0, llm_used=False,
+        )
+
+    async def fake_enrich(self, requested_file_id, products, research, **options):
+        captured["max_pages"] = options["max_pages_per_product"]
+        captured["refresh_fetch_cache"] = options["refresh_fetch_cache"]
+        return EnrichmentResponse(
+            file_id=requested_file_id, provider="searxng-search",
+            researched_at="2026-08-13T18:29:09Z", research=research, products=[],
+            fetch_requests=0, fetch_cache_hits=0, fetch_cache_misses=0,
+            fetch_cache_expired=0, llm_used=False,
+        )
+
+    monkeypatch.setattr(ProductResearchService, "research", fake_research)
+    monkeypatch.setattr(EvidenceEnrichmentService, "enrich", fake_enrich)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        response = TestClient(app).post(
+            f"/api/uploads/{file_id}/research/enrich",
+            json={
+                "product_ids": ["ONE-1", "TWO-2"],
+                "max_pages_per_product": 3,
+                "refresh_fetch_cache": True,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["llm_used"] is False
+    assert captured["research_ids"] == ["ONE-1", "TWO-2"]
+    assert captured["max_pages"] == 3
+    assert captured["refresh_fetch_cache"] is True

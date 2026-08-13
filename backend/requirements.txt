@@ -1,5 +1,6 @@
 fastapi==0.115.14
 httpx==0.28.1
+brotli==1.1.0
 pydantic-settings==2.10.1
 python-multipart==0.0.32
 Pillow==11.3.0
