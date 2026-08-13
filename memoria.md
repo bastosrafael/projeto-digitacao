@@ -1467,3 +1467,14 @@ resultados reais + dados da planilha
 - **GATE FINAL DA CAMADA SEARCH + FILTER + EVIDENCE ATENDIDO.** A Fase 6B pode ser publicada; processamento em lote, fetch de páginas e IA permanecem fora desta execução.
 - Commit autorizado somente após auditoria final: `feat: integra pesquisa real de produtos`. Depois do deploy, validar health e somente 2 produtos no endpoint de produção, preservando provider, cache, mount, portas, Funnel e UI LOCKED.
 - Próxima etapa, ainda não iniciada: **FASE 6B.3 — ENRIQUECIMENTO DE EVIDÊNCIAS**, com possível fetch controlado, extração de texto e comparação entre fontes antes de qualquer IA gratuita.
+
+### Publicação e produção
+
+- Auditoria pré-commit confirmou: nenhum XLSX real ou cache versionado, nenhum secret, nenhuma alteração em frontend/CSS e nenhuma chamada a LLM. O placeholder documental da chave do Coolify não contém valor real.
+- Commit funcional criado e publicado por push normal: `1c18ab9 feat: integra pesquisa real de produtos`. Não houve force push.
+- O Auto Deploy não iniciou. Foi enfileirado redeploy manual seguro, sem force rebuild, deployment `e121hktxouh5m44x3stalrqa`, concluído no commit completo `1c18ab9ceab7c00fe06bd2842860048d6c1a547e`.
+- Novo container `9969de8fc36f` ficou `running/healthy`, preservando `127.0.0.1:18001:8000` e o bind RW `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`.
+- `/health` local e público pelo Tailscale Funnel `:8443` retornaram HTTP 200 com `{"status":"ok"}`. SearXNG permaneceu restrito a `127.0.0.1:8888`; OmniRoute e UI LOCKED não foram alterados.
+- Teste público de produção em `POST /api/uploads/{file_id}/research`, somente com `WY-2026-Y13` e `N260308#`: HTTP 200, provider `searxng-search`, 6 consultas, 6 misses/6 chamadas na primeira execução, zero evidências falsas e ambos `NÃO_ENCONTRADO`.
+- Replay público: HTTP 200, 6 cache hits, zero misses, zero chamadas ao gateway, mesmos resultados e `llm_used=false`.
+- Não houve lote, fetch de páginas, IA, visão, tradução por IA ou geração de descrição DUIMP.
