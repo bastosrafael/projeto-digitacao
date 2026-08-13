@@ -1587,3 +1587,55 @@ resultados reais + dados da planilha
 - **FASE 6C = CONCLUÍDA E VALIDADA EM PRODUÇÃO.** Todos os 16 itens do gate foram atendidos.
 - UI permanece LOCKED no commit `fc53ebb`; nenhum arquivo frontend/CSS foi alterado.
 - Próxima fase, somente depois da conclusão/publicação desta etapa: **FASE 7 — ANÁLISE VISUAL + CRUZAMENTO DE EVIDÊNCIAS**. Não iniciar automaticamente.
+
+## 2026-08-13 — Checkpoint final do dia antes da Fase 7
+
+### Estado encerrado
+
+- **FASES 5A, 5B, 6A, 6B, 6B.3 e 6C = CONCLUÍDAS.** A Fase 6C está validada em produção.
+- **FASE 7 = NÃO INICIADA.** Este checkpoint é exclusivamente documental: nenhum código funcional, frontend, CSS, infraestrutura, OmniRoute, SearXNG, pesquisa, visão, descrição DUIMP ou processamento em lote foi alterado ou iniciado.
+- Pipeline validado: Packing List XLSX -> upload persistente -> leitor universal da Fase 5B -> produto estruturado -> pesquisa real via OmniRoute `/v1/search` -> SearXNG -> filtro/scoring/deduplicação -> fetch controlado das páginas aprovadas -> extração estruturada -> análise textual por IA gratuita via OmniRoute.
+- A IA permanece somente como analisador de evidências fornecidas pelo backend; ela não é mecanismo de pesquisa e não pode alegar que pesquisou, abriu páginas ou consultou fabricantes por conta própria.
+
+### Fase 6C consolidada
+
+- Endpoint: `POST /api/uploads/{file_id}/research/analyze`, limitado a 1–3 produtos explicitamente selecionados. `/research` e `/research/enrich` permanecem preservados.
+- Prompt `evidence-analysis-v1`, armazenado separadamente em `backend/app/prompts/evidence_analysis_v1.txt`.
+- Rota OmniRoute `auto/coding:free`, sem modelo pago e sem nome fixo no projeto; o fallback continua sob responsabilidade do OmniRoute.
+- Schema Pydantic estrito: decisões `FOUND`, `REVIEW` e `NOT_FOUND`; confiança `HIGH`, `MEDIUM` e `LOW`.
+- Proveniência: IDs estáveis `PACKING-001...`, `SEARCH-001...` e `WEB-001...`; IDs e valores retornados são validados contra o registro real e IDs inventados são rejeitados.
+- Campos não comprovados permanecem `UNKNOWN`. Nenhum atributo pode ser preenchido por probabilidade.
+- Conflitos preservam valor da Packing List, valor web, fonte e evidence IDs; divergência relevante leva a `REVIEW`, sem escolha silenciosa.
+- Conteúdo web é `UNTRUSTED DATA`. Instruções encontradas em páginas, como `ignore previous instructions`, são tratadas somente como dados; o teste automatizado de prompt injection passou.
+- Cache separado `llm-analysis-v1`, TTL de sete dias, chave baseada em produto, hashes das evidências, prompt version e analysis version. Arquivos permanecem modo 600; replay idêntico não chama a IA.
+- JSON inválido admite no máximo um retry corretivo. Timeout de 90 segundos, rate limit e indisponibilidade geram `REVIEW`/erro controlado, nunca `NOT_FOUND` artificial.
+
+### Pilotos, uso do LLM e desempenho
+
+- Controle positivo `Raspberry Pi 5`: `FOUND`, confiança `HIGH`, `llm_used=true`. O modelo gratuito efetivamente selecionado naquela execução foi `big-pickle`; esse nome é apenas observacional e não se tornou obrigatório.
+- Replay do controle positivo: cache hit e `llm_used=false`.
+- Produtos reais `WY-2026-Y13` e `N260308#`: `NOT_FOUND/LOW`, sem evidência web aprovada suficiente e `llm_used=false`. Nenhuma evidência foi fabricada.
+- Contexto do controle positivo: aproximadamente 7.644 caracteres. Latência observada: aproximadamente 53,6 s local e 37,4 s em produção. Concorrência LLM mantida em 1.
+- Medição final registrada: backend aproximadamente 49,6 MiB de RAM e SearXNG aproximadamente 58,1 MiB. Manter concorrência baixa.
+- Validação final: 83 testes passaram; `compileall`, `pip check` e `git diff --check` também passaram.
+
+### Git, deploy, produção e preservação
+
+- Commit funcional: `d1d125d feat: adiciona analise de evidencias com ia`.
+- Commit documental de conclusão: `50ba76e docs: registra conclusao da fase 6c`.
+- Deployment final: `s100uyxyol6b69akwjo2s18s`, implantando o commit `50ba76e`; container healthy.
+- Health local e público: HTTP 200. Bind preservado em `127.0.0.1:18001:8000`.
+- Storage persistente RW preservado: host `/opt/projeto-digitacao/data/uploads` -> container `/data/uploads`.
+- Tailscale Funnel preservado em `:8443` para o Projeto Digitação; SearXNG em `127.0.0.1:8888`; OmniRoute na porta `20128`.
+- UI aprovada e LOCKED no commit visual `fc53ebb`; nenhum frontend ou CSS foi alterado na Fase 6C.
+- `main` estava sincronizada com `origin/main` e a árvore de trabalho estava limpa no início deste checkpoint. Nenhum XLSX, HTML real, cache, secret ou arquivo visual foi versionado indevidamente.
+
+### Próximo passo exato
+
+- Amanhã iniciar somente a **FASE 7 — ANÁLISE VISUAL + CRUZAMENTO MULTIMODAL DE EVIDÊNCIAS**: Packing List + search real + web evidence + imagem principal e, quando realmente disponíveis e associados, wash label/hangtag -> cruzamento -> campos confirmados/conflitos/confidence -> `FOUND`, `REVIEW` ou `NOT_FOUND`.
+- Antes de implementar, auditar tecnicamente quais modelos gratuitos atuais do OmniRoute possuem capacidade real de visão. Não inferir capacidade pelo nome; se não houver modelo gratuito adequado, parar e reportar antes de mudar a arquitetura.
+- Começar com um único controle positivo multimodal e depois, no máximo, um ou dois produtos reais. Validar antes a associação imagem <-> linha <-> Style/Code produzida pela Fase 5B. Não executar lote.
+- A imagem pode apoiar somente atributos visualmente observáveis, como categoria, formato, mangas, alças, comprimento, tipo aparente, cor visível e elementos construtivos. Ela não comprova sozinha composição, percentual de fibras, fabricante, NCM, material não observável ou características internas.
+- Wash label e hangtag poderão ser evidências mais fortes para composição, marca, instruções, modelo e tamanho, mas somente após leitura real; nada deve ser presumido.
+- Roadmap preservado: Fase 7 — análise visual e cruzamento multimodal; Fase 8 — descrição técnica objetiva para DUIMP; Fase 9 — Excel final para download. A Fase 7 não deve gerar descrição DUIMP.
+- **Nenhuma funcionalidade da Fase 7 foi iniciada neste checkpoint.**
