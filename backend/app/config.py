@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     fetch_cache_ttl_seconds: int = Field(default=604_800, ge=60)
     fetch_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
     fetch_max_bytes: int = Field(default=3_145_728, ge=65_536, le=5_242_880)
+    llm_analysis_cache_dir: Path = Path("/data/uploads/.llm-analysis-cache")
+    llm_analysis_cache_ttl_seconds: int = Field(default=604_800, ge=60)
+    llm_analysis_timeout_seconds: float = Field(default=90.0, gt=0, le=180)
+    llm_analysis_max_input_chars: int = Field(default=18_000, ge=4_000, le=40_000)
     max_upload_size_mb: int = Field(default=200, gt=0)
     upload_dir: Path = Path("/data/uploads")
     cors_allowed_origins: str = "https://projeto-digitacao.netlify.app"

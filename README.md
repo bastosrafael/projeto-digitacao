@@ -69,6 +69,22 @@ A extração determinística remove scripts, estilos, navegação, menus, banner
 
 O cache de fetch é separado do cache de search, usa parser versionado, URL canonicalizada, arquivos privados e TTL de sete dias em `/data/uploads/.fetch-cache`. Estados explícitos incluem `OK`, `BLOCKED`, `TIMEOUT`, `TOO_LARGE`, `UNSUPPORTED_CONTENT`, `HTTP_ERROR`, `SSRF_BLOCKED` e `PARSE_ERROR`. Todo processamento permanece sequencial e declara `llm_used=false`.
 
+### Fase 6C — análise textual de evidências com IA gratuita
+
+O endpoint `POST /api/uploads/{file_id}/research/analyze` encadeia, para somente 1 a 3 produtos explicitamente selecionados, o search e o enriquecimento já validados e então usa a IA exclusivamente como analisador das evidências fornecidas. `/research` e `/research/enrich` permanecem compatíveis. Não há pesquisa executada pelo modelo, visão, imagens, processamento em lote ou geração de descrição DUIMP.
+
+O contexto enviado ao OmniRoute contém somente campos normalizados da Packing List, no máximo oito resultados de search aprovados e no máximo três páginas `OK`, com excerpt limitado a 2.500 caracteres, structured data compactado, matched signals, conflitos, hashes e URLs reais. HTML completo, XLSX, binários, scripts, menus, resultados `WEAK`, spam, query echo e páginas descartadas não são enviados. A rota continua configurada por `OMNIROUTE_MODEL`, com padrão `auto/coding:free`; nenhum nome de modelo final é fixado no código.
+
+O prompt separado e versionado `evidence-analysis-v1`, em `backend/app/prompts/evidence_analysis_v1.txt`, declara conteúdo web como dado não confiável, nunca como instrução. Ele proíbe alegações de pesquisa, fontes/atributos inventados e inferência de campos ausentes. A saída é validada por Pydantic e aceita somente `FOUND`, `REVIEW` ou `NOT_FOUND`, com confiança `HIGH`, `MEDIUM` ou `LOW` calibrada novamente pelo backend. `FOUND` exige corroboração de identidade em página enriquecida e múltiplos domínios ou resultado forte de fabricante; caso contrário é rebaixado para `REVIEW`.
+
+Proveniência usa IDs estáveis no pacote: `PACKING-001`, `SEARCH-001...` e `WEB-001...`. Valores confirmados precisam existir no conteúdo das evidências citadas. IDs inexistentes e valores inventados, mesmo com ID válido, são rejeitados. Conflitos precisam citar a Packing List e ao menos uma página web, preservar os dois valores e forçar `REVIEW`. O backend completa deterministicamente `unknown_fields` com todo campo do schema que não foi confirmado nem entrou em conflito; assim, cor, composição, fabricante ou qualquer outro atributo ausente nunca é preenchido por probabilidade.
+
+JSON inválido ou não fundamentado recebe no máximo um retry corretivo. Nova falha, timeout, rate limit ou indisponibilidade produz `REVIEW` controlado e `llm_error` sanitizado; nunca vira `NOT_FOUND`. Quando search não encontra evidência aprovada, a IA não é chamada e a resposta retorna `NOT_FOUND`, `llm_used=false` e cache `SKIP`. O acesso ao LLM é serializado com concorrência inicial 1.
+
+O cache próprio `llm-analysis-v1` fica em `/data/uploads/.llm-analysis-cache`, separado dos caches de search/fetch, com arquivos modo 600 e TTL padrão de sete dias. A chave inclui produto normalizado, hash do pacote de evidências, prompt version e analysis version. Em cache hit não existe nova chamada e `llm_used=false`. Logs registram `file_id`, produto, uso do LLM, prompt, quantidade/tamanho de evidências, modelo retornado, latência, decisão, confiança e cache, sem payload completo, HTML ou secrets.
+
+No piloto real controlado de 13/08/2026, `Raspberry Pi 5` reutilizou três search cache hits e três fetch cache hits, sem nova pesquisa/fetch. O pacote de 7.644 caracteres continha oito resultados de search e duas páginas `OK`; `auto/coding:free` selecionou efetivamente `big-pickle`. Uma chamada válida em 53.605 ms retornou `FOUND/HIGH`, confirmou code, item name, manufacturer e brand com IDs existentes, manteve os demais campos como unknown e usou `llm_used=true`. O replay de cache é coberto por teste automatizado e não chama o modelo. Nenhum produto real foi submetido ao LLM porque `WY-2026-Y13` e `N260308#` não possuem evidência aprovada; ambos continuam no caminho determinístico `NOT_FOUND`, `llm_used=false`.
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
@@ -345,6 +361,10 @@ cd /opt/projeto-digitacao/backend
 - `FETCH_CACHE_TTL_SECONDS`: validade do cache de fetch (padrão sete dias).
 - `FETCH_TIMEOUT_SECONDS`: timeout por página (padrão 15 segundos).
 - `FETCH_MAX_BYTES`: limite do HTML descomprimido por página (padrão 3 MiB).
+- `LLM_ANALYSIS_CACHE_DIR`: cache privado da análise (padrão `/data/uploads/.llm-analysis-cache`).
+- `LLM_ANALYSIS_CACHE_TTL_SECONDS`: validade do cache de análise (padrão sete dias).
+- `LLM_ANALYSIS_TIMEOUT_SECONDS`: timeout da única tentativa de transporte por chamada (padrão 90 segundos).
+- `LLM_ANALYSIS_MAX_INPUT_CHARS`: limite do JSON de evidências enviado ao modelo (padrão 18.000 caracteres).
 - `LOG_LEVEL`: nível de log.
 
 O cliente HTTP não segue redirecionamentos, aplica timeout, retry limitado para falhas transitórias e nunca registra a chave nos logs.
