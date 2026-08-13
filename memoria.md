@@ -1577,6 +1577,13 @@ resultados reais + dados da planilha
 
 ### Estado e próximo passo
 
-- A implementação local da Fase 6C atende o gate funcional; publicação/deploy e validação de produção ainda dependem da auditoria final, commit e push.
+- Commit funcional `d1d125d feat: adiciona analise de evidencias com ia` criado e publicado em `origin/main` por push normal, sem force push.
+- O Auto Deploy não iniciou. Redeploy seguro `jxrd20pmzanimoj4r3sgmh5n`, sem force rebuild, foi enfileirado exclusivamente para `applicationId=3` no SHA completo `d1d125de3d85a989510b2a60b816a77337c15688` e terminou com status `finished`.
+- Novo container `1eecd7b9280f` ficou healthy, preservando `127.0.0.1:18001:8000` e bind RW `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`. O Tailscale Funnel permaneceu 443 -> NFLNBA/3001 e 8443 -> Projeto Digitação/18001.
+- `/health` local e público retornaram HTTP 200. O endpoint público `/research/analyze` para `WY-2026-Y13` e `N260308#` retornou HTTP 200, `NOT_FOUND/LOW`, `SKIP`, `llm_calls=0` e `llm_used=false` para ambos.
+- O controle positivo executado no código de produção retornou `FOUND/HIGH`, `auto/coding:free` -> `big-pickle`, uma chamada em 37.439 ms, 7.644 caracteres e `llm_used=true`. A execução permaneceu limitada ao Raspberry Pi 5; não houve lote.
+- Replay imediato do controle em produção: 3 search cache hits, zero gateway calls, 3 fetch cache hits, zero fetches, analysis cache `HIT`, `FOUND/HIGH`, `llm_calls=0` e `llm_used=false`.
+- Recursos após os testes: backend aproximadamente 52 MiB, SearXNG aproximadamente 73 MiB de 512 MiB, host com aproximadamente 796 MiB disponíveis e 3,7 GiB de swap livre. O pico de CPU observado imediatamente após parsing/chamada foi transitório; nenhum processamento concorrente foi executado.
+- **FASE 6C = CONCLUÍDA E VALIDADA EM PRODUÇÃO.** Todos os 16 itens do gate foram atendidos.
 - UI permanece LOCKED no commit `fc53ebb`; nenhum arquivo frontend/CSS foi alterado.
 - Próxima fase, somente depois da conclusão/publicação desta etapa: **FASE 7 — ANÁLISE VISUAL + CRUZAMENTO DE EVIDÊNCIAS**. Não iniciar automaticamente.

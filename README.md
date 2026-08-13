@@ -85,6 +85,8 @@ O cache próprio `llm-analysis-v1` fica em `/data/uploads/.llm-analysis-cache`, 
 
 No piloto real controlado de 13/08/2026, `Raspberry Pi 5` reutilizou três search cache hits e três fetch cache hits, sem nova pesquisa/fetch. O pacote de 7.644 caracteres continha oito resultados de search e duas páginas `OK`; `auto/coding:free` selecionou efetivamente `big-pickle`. Uma chamada válida em 53.605 ms retornou `FOUND/HIGH`, confirmou code, item name, manufacturer e brand com IDs existentes, manteve os demais campos como unknown e usou `llm_used=true`. O replay de cache é coberto por teste automatizado e não chama o modelo. Nenhum produto real foi submetido ao LLM porque `WY-2026-Y13` e `N260308#` não possuem evidência aprovada; ambos continuam no caminho determinístico `NOT_FOUND`, `llm_used=false`.
 
+A Fase 6C foi implantada no Coolify pelo deployment `jxrd20pmzanimoj4r3sgmh5n`, commit `d1d125d`, sem force rebuild. Em produção, health local/público e o endpoint público de análise retornaram HTTP 200. O controle positivo no código implantado retornou `FOUND/HIGH` com o modelo efetivo `big-pickle`; o replay retornou analysis cache `HIT`, `llm_calls=0` e `llm_used=false`. `WY-2026-Y13` e `N260308#` retornaram `NOT_FOUND/LOW`, `SKIP`, zero chamadas e `llm_used=false` tanto localmente quanto pelo Funnel.
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
