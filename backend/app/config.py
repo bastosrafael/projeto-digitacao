@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     omniroute_model: str = "auto/coding:free"
     omniroute_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
     omniroute_max_retries: int = Field(default=2, ge=0, le=5)
+    search_provider: str = "searxng-search"
+    search_cache_dir: Path = Path("/data/uploads/.search-cache")
+    search_cache_ttl_seconds: int = Field(default=604_800, ge=60)
     max_upload_size_mb: int = Field(default=200, gt=0)
     upload_dir: Path = Path("/data/uploads")
     cors_allowed_origins: str = "https://projeto-digitacao.netlify.app"

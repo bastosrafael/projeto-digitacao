@@ -33,11 +33,31 @@ O navegador usa somente `/api/chat`. Durante o desenvolvimento na HOMELAB, o Vit
 
 Uploads não passam pela Netlify Function: o navegador envia `multipart/form-data` diretamente ao endpoint público do FastAPI no Funnel. Assim, o timeout de 25 segundos do proxy de chat não é reutilizado para arquivos grandes.
 
-## Fase 6A — infraestrutura de pesquisa real
+## Fases 6A/6B — infraestrutura e piloto de pesquisa real
 
-O HOMELAB possui um SearXNG self-hosted em Docker, acessível somente em `http://127.0.0.1:8888`, com saída HTML/JSON e quatro engines gratuitas ativas: DuckDuckGo, Brave, Qwant e Mojeek. O OmniRoute 3.8.49 possui a conexão `searxng-search` apontando para esse endereço e o `POST /v1/search` foi validado com resultados e URLs reais, sem API comercial e sem usar LLM como mecanismo de busca.
+O HOMELAB possui um SearXNG self-hosted em Docker, acessível somente em `http://127.0.0.1:8888`, com saída HTML/JSON e três engines gratuitas ativas: Bing Web, Mwmbl e Wiby. O OmniRoute 3.8.49 possui a conexão `searxng-search` apontando para esse endereço e o `POST /v1/search` foi validado com resultados e URLs reais, sem API comercial e sem usar LLM como mecanismo de busca.
 
-Esta infraestrutura ainda não está integrada ao backend do Projeto Digitação. Essa integração, incluindo consultas por produto, evidências e cache, pertence à Fase 6B. O frontend permanece inalterado.
+A infraestrutura está integrada ao backend pelo `POST /api/uploads/{file_id}/research`. A rota exige 2 ou 3 `product_ids` distintos, usa no máximo quatro consultas preparadas pelo leitor para cada produto, chama o provider `searxng-search` sequencialmente e nunca usa LLM como mecanismo de busca. O frontend permanece inalterado.
+
+Antes de qualquer IA, o backend normaliza URLs, remove parâmetros de rastreamento, deduplica resultados, bloqueia redes sociais e domínios de ruído conhecidos, pontua coincidências de código e sinais auxiliares e exige corroboração fora do título para fontes gerais. Essa última regra impede páginas de spam que apenas repetem a consulta no título. Evidências aceitas preservam título, URL, snippet, provider/engine, posição, data, consulta, score e motivos de relevância; marketplaces recebem prioridade secundária.
+
+O cache privado fica, por padrão, em `/data/uploads/.search-cache`, indexado por provider e consulta Unicode normalizada, com validade de sete dias. A resposta informa chamadas reais, acertos de cache e `llm_used=false`. As variáveis `SEARCH_PROVIDER`, `SEARCH_CACHE_DIR` e `SEARCH_CACHE_TTL_SECONDS` permitem ajuste somente no backend.
+
+Exemplo controlado:
+
+```bash
+curl -X POST http://127.0.0.1:18001/api/uploads/UUID/research \
+  -H 'Content-Type: application/json' \
+  -d '{"product_ids":["WW77#","CY2926","CY2927"],"max_queries_per_product":2}'
+```
+
+No piloto real de 13/08/2026, seis consultas dos três produtos produziram 40 resultados brutos. Todos foram corretamente descartados por falta de comprovação, inclusive páginas artificiais retornadas pela Qwant que refletiam a consulta no título; os produtos ficaram `NÃO_ENCONTRADO`. A repetição do piloto teve seis acertos de cache, zero chamadas ao gateway e nenhuma chamada a IA. A expansão para mais produtos e a análise posterior por IA gratuita ainda não foram iniciadas.
+
+No segundo piloto controlado, um seletor determinístico escolheu `WY-2026-Y11`, `N260309#` e `CY2926` por riqueza e diversidade de metadados. O gerador usou até quatro consultas progressivas por produto: código exato, código + categoria normalizada por glossário fechado, código + fabricante/fornecedor e código + característica discriminante; NCM sem pontuação é apenas fallback. Das 64 ocorrências brutas retornadas, 64 URLs eram únicas e nenhuma sobreviveu: 40 eram evidências fracas sem confirmação além do título e 24 eram query echo artificial. A repetição teve 12 cache hits e zero chamadas ao gateway.
+
+O diagnóstico direto do SearXNG mostrou Brave suspenso por excesso de requisições, DuckDuckGo em CAPTCHA, Mojeek com acesso negado e Qwant como única engine respondendo — justamente com resultados artificiais; em uma consulta a própria Qwant entrou em CAPTCHA. Assim, o segundo piloto ficou inconclusivo por indisponibilidade/qualidade do motor, e não demonstrou excesso de rigor do filtro. Commit, push e deploy permanecem bloqueados até existir ao menos uma fonte de busca saudável e o piloto ser repetido.
+
+Na recuperação da base gratuita, Bing Web, Mwmbl e Wiby foram validadas e passaram a formar o conjunto ativo. O controle positivo `Raspberry Pi 5`, processado sem exceções pelo mesmo pipeline, reteve a página do produto em `raspberrypi.com` como evidência `STRONG`. Em contraste, os Styles dos Packing Lists continuaram corretamente como `NÃO_ENCONTRADO` quando só havia páginas desconexas. Esse contraste valida a camada determinística de busca, filtro e evidência sem IA; fetch de páginas e enriquecimento permanecem para a Fase 6B.3.
 
 ## Repositório
 
@@ -308,6 +328,9 @@ cd /opt/projeto-digitacao/backend
 - `OMNIROUTE_MODEL`: modelo ou rota configurável (padrão `auto/coding:free`).
 - `OMNIROUTE_TIMEOUT_SECONDS`: timeout por tentativa.
 - `OMNIROUTE_MAX_RETRIES`: quantidade de novas tentativas (0 a 5).
+- `SEARCH_PROVIDER`: provider explícito do Search Gateway (padrão `searxng-search`).
+- `SEARCH_CACHE_DIR`: cache privado persistente (padrão `/data/uploads/.search-cache`).
+- `SEARCH_CACHE_TTL_SECONDS`: validade do cache em segundos (padrão sete dias).
 - `LOG_LEVEL`: nível de log.
 
 O cliente HTTP não segue redirecionamentos, aplica timeout, retry limitado para falhas transitórias e nunca registra a chave nos logs.

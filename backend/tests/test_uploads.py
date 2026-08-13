@@ -1,3 +1,5 @@
+import hashlib
+import json
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
@@ -8,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings, get_settings
 from app.main import app
 from app.services.omniroute import OmniRouteService
+from app.services import upload_service
 from app.services.upload_service import sanitize_original_filename
 
 client = TestClient(app)
@@ -90,8 +93,55 @@ def test_upload_accepts_valid_xlsx_and_uses_uuid_name(upload_settings: Settings)
     assert payload["size_bytes"] == len(data)
     assert payload["status"] == "uploaded"
     assert payload["stored_filename"] == f'{payload["file_id"]}.xlsx'
+    assert payload["sha256"] == hashlib.sha256(data).hexdigest()
+    assert payload["uploaded_at"].endswith("Z")
     assert (upload_settings.upload_dir / payload["stored_filename"]).read_bytes() == data
+    metadata_path = upload_settings.upload_dir / f'{payload["file_id"]}.json'
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata == {
+        "schema_version": 1,
+        "file_id": payload["file_id"],
+        "original_filename": "IM0416-26 - PACKING LIST.xlsx",
+        "stored_filename": payload["stored_filename"],
+        "size_bytes": len(data),
+        "sha256": payload["sha256"],
+        "uploaded_at": payload["uploaded_at"],
+    }
+    assert oct(metadata_path.stat().st_mode & 0o777) == "0o600"
     assert not list(upload_settings.upload_dir.glob("*.part"))
+
+
+def test_upload_metadata_can_be_retrieved_by_controlled_id(upload_settings: Settings) -> None:
+    created = client.post(
+        "/api/uploads",
+        files={"file": ("produtos.xlsx", make_xlsx(), "application/octet-stream")},
+    ).json()
+
+    response = client.get(f'/api/uploads/{created["file_id"]}')
+
+    assert response.status_code == 200
+    assert response.json() == created
+    assert client.get("/api/uploads/not-a-uuid").status_code == 422
+    assert client.get(f"/api/uploads/{'0' * 36}").status_code == 422
+
+
+def test_metadata_failure_removes_xlsx_and_partial_files(
+    upload_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_metadata(*_args: object) -> None:
+        raise OSError("falha simulada")
+
+    monkeypatch.setattr(upload_service, "_write_metadata", fail_metadata)
+
+    response = client.post(
+        "/api/uploads",
+        files={"file": ("produtos.xlsx", make_xlsx(), "application/octet-stream")},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Não foi possível armazenar o arquivo."}
+    assert list(upload_settings.upload_dir.iterdir()) == []
 
 
 def test_upload_never_calls_omniroute(

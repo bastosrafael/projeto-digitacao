@@ -1335,3 +1335,135 @@ resultados reais + dados da planilha
 - Storage RW preservado: host `/opt/projeto-digitacao/data/uploads` -> container `/data/uploads`.
 - SearXNG preservado em `127.0.0.1:8888`; OmniRoute preservado na porta 20128.
 - Fases futuras permanecem: Fase 7 — análise visual e cruzamento de evidências; Fase 8 — descrição técnica objetiva para DUIMP; Fase 9 — Excel final para download.
+
+## 2026-08-13 — Fase 6B: piloto de integração e filtragem pré-IA
+
+- O backend passou a integrar produtos estruturados da Fase 5B ao OmniRoute `POST /v1/search`, usando exclusivamente o provider `searxng-search`. Nenhuma alteração foi feita no SearXNG, OmniRoute, Coolify, Funnel ou frontend.
+- Criado `POST /api/uploads/{file_id}/research`, restrito a 2 ou 3 `product_ids` distintos e a no máximo 3 consultas por produto. O processamento é sequencial para respeitar a RAM limitada do HOMELAB.
+- O fluxo implementado é: análise do XLSX -> seleção explícita dos produtos -> consultas preparadas -> busca real -> normalização de URL -> deduplicação -> bloqueio de ruído -> scoring -> evidências rastreáveis -> cache.
+- Cada evidência aceita preserva título, URL, snippet, provider, engine de origem, posição, timestamp, query, categoria da fonte, score e motivos de relevância. A resposta declara `llm_used=false`.
+- O cache privado usa provider + consulta Unicode normalizada, registra timestamp/status/resposta, validade padrão de 7 dias e fica em `/data/uploads/.search-cache`, dentro do mount persistente existente.
+- O piloto real utilizou `WW77#`, `CY2926` e `CY2927`, todos do upload `c21b5d16-d31f-4722-8c3b-213d19360be3`, com 2 consultas por produto e até 8 resultados por consulta.
+- As 6 pesquisas reais avaliaram 40 resultados brutos. Foi identificado query-reflection spam da Qwant: páginas em domínios aleatórios repetiam código, fabricante, item e NCM no título, mas apresentavam snippets artificiais sem relação factual.
+- O filtro foi endurecido para exigir, em fontes gerais, ao menos um sinal do produto também no snippet, caminho da URL ou domínio. Após a correção, os 40 resultados foram descartados e os três produtos ficaram `NÃO_ENCONTRADO`, sem produzir falsas evidências.
+- A repetição imediata executou as mesmas 6 consultas com 6 cache hits, zero chamadas ao gateway e `llm_used=false`.
+- Validação local: 37 testes backend passando, `compileall` sem erros e `git diff --check` limpo.
+- **FASE 6B — PILOTO CONTROLADO INTEGRADO E VALIDADO.** A expansão para outros produtos e o envio posterior das evidências filtradas às IAs gratuitas não foram iniciados.
+
+## 2026-08-13 — Fase 6B: segundo piloto controlado antes de commit/deploy
+
+### Seleção automática
+
+- Foi criado um seletor determinístico que considera campos úteis, pesos de identidade/composição, distintividade do código e diversidade em relação aos produtos já escolhidos. Fórmulas `DISPIMG` não contam como metadado.
+- Entre os 145 produtos dos dois Packing Lists, o seletor escolheu `WY-2026-Y11`, `N260309#` e `CY2926`, todos do upload `c21b5d16-d31f-4722-8c3b-213d19360be3`.
+- Cada selecionado possuía 6 sinais úteis: code, item_name, NCM, composição, construção e fabricante. O primeiro tinha código mais distintivo; os seguintes acrescentaram combinações novas de categoria, composição, fabricante e NCM. `CY2926` reapareceu por ranking automático, não por escolha manual baseada no piloto anterior.
+
+### Estratégia de consultas e scoring
+
+- O query builder passou a produzir até quatro consultas progressivas: código exato; código + categoria; código + fabricante/fornecedor/marca; código + característica discriminante. Código + NCM sem pontuação é usado somente como fallback quando não existe característica melhor.
+- Adicionado glossário multilíngue fechado e determinístico apenas para termos inequívocos observados nos Packing Lists, por exemplo `短袖T恤 -> short sleeve T-shirt`, `梭织 -> woven`, `针织 -> knitted`, `涤/涤纶 -> polyester`, `棉 -> cotton` e `氨纶 -> elastane`. Termos desconhecidos permanecem originais; nenhuma IA ou tradução probabilística é usada.
+- O scoring distingue evidência `STRONG`, `MODERATE` e `WEAK`. Código no snippet ou URL é forte, salvo código curto/ambíguo sem corroboração. Código apenas no título exige outro sinal no snippet/URL/domínio ou compatibilidade nominal de fabricante/fornecedor; evidência fraca é descartada.
+- A classificação de domínio passou a usar `MANUFACTURER`, `SUPPLIER`, `DISTRIBUTOR`, `STORE`, `MARKETPLACE` ou `UNKNOWN`. Compatibilidade nominal nunca é declarada como prova de oficialidade.
+- Páginas de busca interna, query echo, domínio bloqueado, conteúdo spam, resultado inválido, conteúdo desconexo e score baixo recebem motivos de descarte explícitos. Evidências válidas em domínios distintos recebem pequeno bônus de corroboração.
+- A resposta agora registra por consulta provider, cache HIT/MISS, total bruto, total após dedupe, total após filtro e motivos agregados de descarte. `llm_used` permanece invariavelmente `false`.
+
+### Resultado do segundo piloto
+
+- 12 consultas novas foram executadas sequencialmente, com 12 cache misses e 12 chamadas reais ao gateway; nenhuma entrada anterior foi apagada ou invalidada.
+- `WY-2026-Y11`: 24 brutos, 24 deduplicados, 24 descartados — 16 `weak_evidence`, 8 `query_echo`, 0 mantidos, `NÃO_ENCONTRADO`.
+- `N260309#`: 16 brutos, 16 deduplicados, 16 descartados — 16 `weak_evidence`, 0 mantidos, `NÃO_ENCONTRADO`.
+- `CY2926`: 24 brutos, 24 deduplicados, 24 descartados — 8 `weak_evidence`, 16 `query_echo`, 0 mantidos, `NÃO_ENCONTRADO`.
+- Total: 64 brutos, 64 URLs únicas após dedupe, 64 descartados, zero evidências mantidas. Não existiram top 3 legítimos para reportar; publicar páginas artificiais como top results seria enganoso.
+- Repetição imediata: 12 consultas, 12 cache hits, zero cache misses, zero chamadas ao gateway e `llm_used=false`.
+
+### Diagnóstico e gate
+
+- Amostras do cache confirmaram que os resultados fracos/echo eram todos da Qwant, em domínios aleatórios, com a consulta copiada no título e snippets sem relação factual.
+- Consulta direta ao SearXNG confirmou: Brave `Suspended: too many requests`, DuckDuckGo `CAPTCHA`, Mojeek `Suspended: access denied`; Qwant forneceu 10 resultados artificiais para dois códigos e entrou em `CAPTCHA` para outro.
+- Classificação da causa: principalmente **D — search engines indisponíveis ou retornando resultados ruins**; secundariamente **E/A — códigos possivelmente sem presença pública e produtos difíceis de encontrar**. Não há evidência de **B — query ruim** após as consultas progressivas, nem de **C — filtro excessivamente restritivo**, pois nenhum resultado amostrado continha confirmação legítima no snippet, URL ou domínio.
+- O teste automatizado específico preserva o caso Qwant: título contém código/consulta, snippet não comprova, URL não comprova e domínio não comprova -> `query_echo` descartado.
+- Validação local após os ajustes: 41 testes backend passando. Frontend/UI não foi alterado, nenhum XLSX/cache foi versionado e nenhuma IA foi chamada.
+- **GATE NÃO ATENDIDO:** sem fonte de busca saudável não foi possível demonstrar retenção de evidência real. Por isso não houve commit, push nem deploy nesta execução.
+- Próximo passo seguro: restaurar ao menos uma engine gratuita confiável no SearXNG e repetir somente este piloto. Depois de evidência legítima sobreviver, preparar commit/deploy; somente então iniciar a etapa de enriquecimento de evidências da Fase 6B e decidir sobre fetch controlado ou comparação posterior por IA gratuita.
+
+## 2026-08-13 — Fase 6B.1: recuperação da base de busca gratuita
+
+### Backup, recursos e preservação
+
+- Antes de alterar a configuração, foi criado o backup privado `/opt/searxng/backups/pre-6b1-20260813`, modo 700, contendo `compose.yaml`, `.env`, `/etc/searxng/settings.yml` e instruções de rollback. Nenhum secret foi exibido ou adicionado ao Git.
+- Estado anterior preservado: imagem `searxng/searxng:2026.8.10-0a118066d`, container `searxng`, `unless-stopped`, bind exclusivo `127.0.0.1:8888:8080`, 512 MiB de RAM, 1 CPU, 256 PIDs e engines DuckDuckGo/Brave/Qwant/Mojeek.
+- Recursos antes dos testes: SearXNG 48,33 MiB/512 MiB; host com aproximadamente 717 MiB disponíveis e 3,5 GiB de swap livre; filesystem com 33 GiB livres. O host não estava crítico.
+- Foi mantido o mesmo container. Não foram instalados proxy, Tor, VPN, Redis, Valkey, outro metasearch, scraper, API comercial ou serviço adicional. Custo permaneceu US$ 0.
+
+### Auditoria individual de engines
+
+- A versão instalada contém implementações web nativas de Bing, Google, Yahoo, Startpage, DuckDuckGo, Brave, Qwant e Mojeek. Também foram auditadas as alternativas gratuitas Yep, Mwmbl e Wiby.
+- **Bing Web:** saudável; `OpenAI` HTTP 200, cerca de 540 ms, 10 resultados reais, sem erro. Os três códigos retornaram 10 resultados cada, porém desconexos dos produtos têxteis.
+- **Google Web:** existe no código com `inactive: true`; após habilitação temporária explícita, respondeu HTTP 200 em 129–440 ms, mas retornou zero resultados nas quatro consultas. Inutilizável neste ambiente/versão.
+- **Yahoo Web:** saudável isoladamente; `OpenAI` retornou 7 resultados reais em aproximadamente 1,4 s. Para os códigos, retornou colisões reais porém erradas, como veículos Nissan/Chery e peça Canon. Ao ser combinado com outra engine apresentou timeout/erro de protocolo e foi excluído por instabilidade.
+- **Startpage:** CAPTCHA na primeira consulta e suspensão local nas seguintes. Não houve insistência upstream após o bloqueio.
+- **DuckDuckGo:** CAPTCHA confirmado em uma única revalidação.
+- **Brave:** `too many requests` confirmado em uma única revalidação.
+- **Qwant:** respondeu 10 resultados, mas todos eram páginas artificiais/query echo em domínios aleatórios; excluída.
+- **Mojeek:** `access denied` confirmado em uma única revalidação.
+- **Yep:** `OpenAI` retornou 20 resultados reais e bons, mas a primeira consulta de produto atingiu timeout e a engine ficou suspensa; excluída por instabilidade.
+- **Mwmbl:** `OpenAI` retornou 117 resultados reais em aproximadamente 4,3 s; respondeu corretamente com zero resultados para os três códigos, sem CAPTCHA/erro.
+- **Wiby:** `OpenAI` retornou 12 resultados reais em aproximadamente 3,1 s; respondeu corretamente com zero resultados para os três códigos, sem CAPTCHA/erro.
+
+### Configuração final e validação
+
+- Conjunto final ativo limitado a três engines gratuitas: `bing`, `mwmbl` e `wiby`.
+- O container foi reiniciado após a configuração final. `/config` confirmou somente essas três engines. A configuração ativa e a cópia privada `/opt/searxng/final-settings.yml` possuem SHA-256 `89c3ebef564f6f53dc5146f689487315a18e44d7a7dc101bc465cc393b382eab`.
+- Consulta direta final `OpenAI`: HTTP 200, aproximadamente 2,4 s, 139 resultados — 10 Bing, 117 Mwmbl e 12 Wiby —, sem engines não responsivas. Os primeiros resultados incluíram `openai.com` e outras páginas reais.
+- Consultas diretas finais dos códigos: 10 resultados Bing para cada código, todos desconexos; Mwmbl e Wiby não encontraram os códigos. Não houve páginas artificiais da Qwant.
+- OmniRoute `POST /v1/search`, provider `searxng-search`: consulta de controle nova e três códigos retornaram HTTP 200, `cached=false`, resultados Bing reais, custo US$ 0 e nenhum erro. O provider e a conexão existentes foram preservados.
+
+### Cache e piloto pelo filtro da Fase 6B
+
+- O cache histórico de 12 arquivos não foi apagado. Para evitar mistura com o conjunto antigo, foi criado o namespace privado `/data/uploads/.search-cache/bing-mwmbl-wiby-v1`, também ignorado pelo Git.
+- Primeira execução no namespace: 12 queries, 12 cache misses, 12 chamadas ao gateway e `llm_used=false`.
+- `WY-2026-Y11`: 32 brutos, 8 URLs únicas, 32 descartados — 24 duplicatas entre consultas, 6 evidências fracas e 2 domínios bloqueados; zero mantidos.
+- `N260309#`: 32 brutos, 32 URLs únicas, 32 evidências fracas descartadas; zero mantidos.
+- `CY2926`: 32 brutos, 32 URLs únicas, 31 evidências fracas e 1 domínio bloqueado; zero mantidos.
+- Total: 96 ocorrências brutas, 72 URLs únicas, zero evidências mantidas e zero `query_echo`. Os resultados eram páginas reais, mas não correspondiam aos produtos estruturados.
+- Repetição: 12 cache hits, zero misses, zero chamadas ao gateway e `llm_used=false`.
+
+### Gate e estado
+
+- **GATE 6B.1 ATENDIDO PELO CRITÉRIO C:** existem três engines gratuitas funcionais e a consulta de controle é saudável; Bing retornou resultados reais para os códigos, mas todos desconexos, enquanto Mwmbl/Wiby retornaram zero. Isso constitui evidência clara de ausência pública indexada desses três produtos nas fontes testadas.
+- O filtro não foi relaxado nem alterado nesta recuperação. `WEAK`, proteção `query_echo`, dedupe, scoring, limite de 2–3 produtos e `llm_used=false` foram preservados.
+- Validação: 41 testes backend passando, `compileall` sem erros e `git diff --check` limpo.
+- Recursos finais: SearXNG 122,7 MiB/512 MiB; host com aproximadamente 704 MiB disponíveis e 3,5 GiB de swap livre; 33 GiB de disco livres. O limite de RAM não foi aumentado.
+- **FASE 6B NÃO ESTÁ CONCLUÍDA.** Não houve commit, push ou deploy do Projeto Digitação.
+- Próxima decisão recomendada: manter Bing/Mwmbl/Wiby como base gratuita e escolher novos produtos com provável presença pública para validar retenção legítima antes de commit/deploy. Somente depois iniciar enriquecimento/fetch controlado de evidências.
+
+## 2026-08-13 — Fase 6B.2: controle positivo e validação final da pesquisa determinística
+
+### Controle positivo
+
+- Foi usado exclusivamente em memória o produto público `Raspberry Pi 5`, identificado como `POSITIVE_CONTROL`, com fabricante/marca `Raspberry Pi` e categoria `single-board computer`. Ele não foi incluído em Packing List, upload ou dado persistente do projeto.
+- A escolha fornece um modelo inequívoco, amplamente indexado e com página pública do produto em domínio nominalmente compatível com o fabricante. Não foi criada regra especial nem bypass de aceitação.
+- O mesmo query builder produziu três consultas: `"Raspberry Pi 5"`, `"Raspberry Pi 5" "single-board computer"` e `"Raspberry Pi 5" "Raspberry Pi"`.
+- O mesmo `ProductResearchService` executou busca, canonicalização, dedupe, bloqueio de spam, proteção query echo, scoring e classificação de evidências pelo provider `searxng-search` e pelas engines Bing/Mwmbl/Wiby.
+- Resultado: 24 ocorrências brutas, 15 URLs únicas, 11 evidências mantidas e classificação técnica `FOUND`. A melhor evidência foi `https://www.raspberrypi.com/products/raspberry-pi-5/`, engine Bing, categoria `MANUFACTURER`, força `STRONG` e score 12,5.
+- A categoria `MANUFACTURER` decorre da compatibilidade determinística entre `Raspberry Pi` e `raspberrypi.com`; o pipeline continua registrando que compatibilidade nominal não é, isoladamente, prova absoluta de oficialidade.
+- Repetição do controle: 3 cache hits, zero misses, zero chamadas ao gateway e `llm_used=false`.
+
+### Produtos reais adicionais
+
+- Excluídos todos os códigos dos pilotos anteriores, o ranking determinístico selecionou `WY-2026-Y13` e `N260308#`. Ambos possuem code/style, item name, NCM, composição, construção e fabricante; o primeiro obteve score de riqueza 19 e o segundo 18.
+- `WY-2026-Y13`: consultas `"WY-2026-Y13"`, código + `short sleeve T-shirt`, código + fabricante `叶芬` e código + `knitted polyester cotton`. Foram 32 ocorrências, 8 URLs únicas, 24 duplicatas, 6 evidências fracas, 2 domínios bloqueados e zero evidências mantidas.
+- Como o código não produziu evidência, foi executada uma única consulta experimental sem código: `"叶芬" "short sleeve T-shirt" knitted cotton polyester`. Os 8 resultados foram únicos, porém todos `WEAK` e corretamente descartados; categoria genérica não foi tratada como correspondência.
+- `N260308#`: consultas pelo código, código + item original, código + fabricante `黄林` e código + `woven elastane polyester`. Foram 32 ocorrências e 32 URLs únicas; 8 foram bloqueadas por conteúdo spam, 22 eram evidências fracas e 2 pertenciam a domínios bloqueados. Nenhuma evidência foi mantida.
+- Os dois produtos ficaram `NOT_FOUND`/`NÃO_ENCONTRADO`; não houve caso `REVIEW`. Há indício técnico de `possible_private_style_code=true` para ambos, pois as engines são saudáveis, as consultas combinadas funcionaram, mas nenhum resultado associou código e metadados. Isso é inferência, não afirmação factual sobre o fornecedor.
+
+### Conclusão e gate
+
+- O contraste entre o controle público `FOUND` e os Styles reais `NOT_FOUND` demonstra que os filtros não estão excessivamente rígidos e que ausência de comprovação não precisa ser mascarada por IA.
+- Anti-spam e proteção Qwant/query echo permanecem sem relaxamento. Não houve query echo no conjunto atual. Evidência `WEAK` isolada continua incapaz de gerar `FOUND`.
+- A lógica de query/scoring não mudou nesta etapa; foi preservado o namespace `bing-mwmbl-wiby-v1`. As oito consultas reais e a consulta experimental repetiram com 9 cache hits e zero chamadas ao gateway. Nenhum cache histórico foi apagado.
+- Adicionado teste determinístico com mock para o controle positivo, sem dependência da internet: a URL oficial-like é canonicalizada, classificada como `MANUFACTURER`/`STRONG`, deduplicada entre três consultas e passa pelo serviço regular com `llm_used=false`.
+- Validação local: 42 testes backend passando, `compileall` sem erros e `git diff --check` limpo.
+- **GATE FINAL DA CAMADA SEARCH + FILTER + EVIDENCE ATENDIDO.** A Fase 6B pode ser publicada; processamento em lote, fetch de páginas e IA permanecem fora desta execução.
+- Commit autorizado somente após auditoria final: `feat: integra pesquisa real de produtos`. Depois do deploy, validar health e somente 2 produtos no endpoint de produção, preservando provider, cache, mount, portas, Funnel e UI LOCKED.
+- Próxima etapa, ainda não iniciada: **FASE 6B.3 — ENRIQUECIMENTO DE EVIDÊNCIAS**, com possível fetch controlado, extração de texto e comparação entre fontes antes de qualquer IA gratuita.

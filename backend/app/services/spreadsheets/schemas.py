@@ -32,6 +32,21 @@ class ProductImages(BaseModel):
     other: list[SpreadsheetImage] = Field(default_factory=list)
 
 
+class ResearchPreparation(BaseModel):
+    queries: list[str] = Field(default_factory=list)
+    evidence_terms: dict[str, str] = Field(default_factory=dict)
+    focus_fields: list[str] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DescriptionPreparation(BaseModel):
+    verified_facts: dict[str, str] = Field(default_factory=dict)
+    ordered_fields: list[str] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
+    policy_version: str = "duimp-v1"
+
+
 class Product(BaseModel):
     product_id: str
     code: str | None = None
@@ -45,12 +60,25 @@ class Product(BaseModel):
     construction: str | None = None
     color: str | None = None
     size: str | None = None
+    purpose: str | None = None
+    dimensions: str | None = None
+    weight: str | None = None
+    capacity: str | None = None
+    voltage: str | None = None
+    power: str | None = None
+    frequency: str | None = None
+    battery: str | None = None
+    recharge: str | None = None
+    connection: str | None = None
+    accessories: str | None = None
     manufacturer: str | None = None
     supplier: str | None = None
     brand: str | None = None
     packing_info: list[str] = Field(default_factory=list)
     original_values: dict[str, list[str]] = Field(default_factory=dict)
     images: ProductImages = Field(default_factory=ProductImages)
+    research_preparation: ResearchPreparation = Field(default_factory=ResearchPreparation)
+    description_preparation: DescriptionPreparation = Field(default_factory=DescriptionPreparation)
     status: str = "OK"
     warnings: list[str] = Field(default_factory=list)
 

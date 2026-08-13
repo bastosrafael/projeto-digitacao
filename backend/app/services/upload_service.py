@@ -1,6 +1,9 @@
+import hashlib
+import json
 import logging
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 from xml.etree import ElementTree
@@ -35,12 +38,60 @@ class UploadSizeError(Exception):
     pass
 
 
+class UploadMetadataError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class StoredUpload:
     file_id: str
     original_filename: str
     stored_filename: str
     size_bytes: int
+    sha256: str
+    uploaded_at: str
+
+
+def _write_metadata(path: Path, upload: StoredUpload) -> None:
+    payload = {
+        "schema_version": 1,
+        "file_id": upload.file_id,
+        "original_filename": upload.original_filename,
+        "stored_filename": upload.stored_filename,
+        "size_bytes": upload.size_bytes,
+        "sha256": upload.sha256,
+        "uploaded_at": upload.uploaded_at,
+    }
+    with path.open("x", encoding="utf-8") as destination:
+        path.chmod(0o600)
+        json.dump(payload, destination, ensure_ascii=False, separators=(",", ":"))
+        destination.write("\n")
+        destination.flush()
+        os.fsync(destination.fileno())
+
+
+def load_upload_metadata(upload_dir: Path, file_id: str) -> StoredUpload | None:
+    path = upload_dir / f"{file_id}.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            payload.get("schema_version") != 1
+            or payload.get("file_id") != file_id
+            or payload.get("stored_filename") != f"{file_id}.xlsx"
+        ):
+            raise UploadMetadataError("Metadados de upload inconsistentes.")
+        return StoredUpload(
+            file_id=payload["file_id"],
+            original_filename=payload["original_filename"],
+            stored_filename=payload["stored_filename"],
+            size_bytes=int(payload["size_bytes"]),
+            sha256=payload["sha256"],
+            uploaded_at=payload["uploaded_at"],
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError) as exc:
+        raise UploadMetadataError("Não foi possível ler os metadados do upload.") from exc
 
 
 def _local_name(tag: str) -> str:
@@ -119,8 +170,11 @@ async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
     file_id = str(uuid4())
     original_filename = sanitize_original_filename(upload.filename)
     temporary_path = settings.upload_dir / f".{file_id}.part"
+    temporary_metadata_path = settings.upload_dir / f".{file_id}.metadata.part"
     final_path = settings.upload_dir / f"{file_id}.xlsx"
+    metadata_path = settings.upload_dir / f"{file_id}.json"
     size_bytes = 0
+    digest = hashlib.sha256()
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
 
@@ -131,6 +185,7 @@ async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
                 size_bytes += len(chunk)
                 if size_bytes > settings.max_upload_size_bytes:
                     raise UploadSizeError
+                digest.update(chunk)
                 destination.write(chunk)
 
             destination.flush()
@@ -138,9 +193,21 @@ async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
 
         validate_xlsx(temporary_path, original_filename)
         temporary_path.replace(final_path)
+        stored = StoredUpload(
+            file_id=file_id,
+            original_filename=original_filename,
+            stored_filename=final_path.name,
+            size_bytes=size_bytes,
+            sha256=digest.hexdigest(),
+            uploaded_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        )
+        _write_metadata(temporary_metadata_path, stored)
+        temporary_metadata_path.replace(metadata_path)
     except Exception:
         temporary_path.unlink(missing_ok=True)
+        temporary_metadata_path.unlink(missing_ok=True)
         final_path.unlink(missing_ok=True)
+        metadata_path.unlink(missing_ok=True)
         raise
 
     logger.info(
@@ -148,9 +215,4 @@ async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
         file_id,
         size_bytes,
     )
-    return StoredUpload(
-        file_id=file_id,
-        original_filename=original_filename,
-        stored_filename=final_path.name,
-        size_bytes=size_bytes,
-    )
+    return stored

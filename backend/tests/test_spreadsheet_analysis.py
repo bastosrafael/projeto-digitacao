@@ -113,6 +113,87 @@ def test_infers_code_column_from_values_when_title_is_unknown(tmp_path: Path) ->
     assert {product.code for product in result.products} == {"CY2927", "CY2926"}
 
 
+def test_extracts_technical_fields_and_prepares_evidence_context(tmp_path: Path) -> None:
+    path = save_workbook(
+        tmp_path / "technical-fields.xlsx",
+        [
+            "Code",
+            "Item name",
+            "Application",
+            "Dimensions",
+            "Voltage",
+            "Power",
+            "Accessories",
+            "Manufacturer",
+        ],
+        [["DW116", "Furadeira/parafusadeira", "Perfuração e aparafusamento", "30 x 20 cm", "48 V", "500 W", "Bateria e carregador", "DEWEN"]],
+    )
+
+    result = analyze_workbook(path, str(uuid4()))
+    product = result.products[0]
+
+    assert product.purpose == "Perfuração e aparafusamento"
+    assert product.dimensions == "30 x 20 cm"
+    assert product.voltage == "48 V"
+    assert product.power == "500 W"
+    assert product.accessories == "Bateria e carregador"
+    assert product.research_preparation.evidence_terms["manufacturer"] == "DEWEN"
+    assert product.research_preparation.queries[:3] == [
+        '"DW116"',
+        '"DW116" "Furadeira/parafusadeira"',
+        '"DW116" "DEWEN"',
+    ]
+    assert product.description_preparation.verified_facts["purpose"] == "Perfuração e aparafusamento"
+    assert product.description_preparation.policy_version == "duimp-v1"
+
+
+@pytest.mark.parametrize(
+    ("headers", "values"),
+    [
+        (
+            [
+                "Código", "Produto", "Finalidade", "Dimensões", "Peso",
+                "Capacidade", "Tensão", "Potência", "Frequência", "Bateria",
+                "Recarga", "Conexão", "Acessórios",
+            ],
+            [
+                "PT-1", "Produto técnico", "Uso doméstico", "10 x 20 cm", "2 kg",
+                "5 L", "220 V", "100 W", "60 Hz", "Li-ion", "USB-C",
+                "Bluetooth", "Cabo",
+            ],
+        ),
+        (
+            [
+                "款号", "品名", "用途", "尺寸", "重量", "容量", "电压", "功率",
+                "频率", "电池", "充电", "连接", "配件",
+            ],
+            [
+                "CN-1", "技术产品", "家用", "10 x 20 cm", "2 kg", "5 L",
+                "220 V", "100 W", "60 Hz", "Li-ion", "USB-C", "Bluetooth", "电缆",
+            ],
+        ),
+    ],
+)
+def test_extracts_portuguese_and_chinese_technical_headers(
+    tmp_path: Path,
+    headers: list[str],
+    values: list[str],
+) -> None:
+    path = save_workbook(tmp_path / f"technical-{uuid4()}.xlsx", headers, [values])
+
+    product = analyze_workbook(path, str(uuid4())).products[0]
+
+    assert product.dimensions == "10 x 20 cm"
+    assert product.weight == "2 kg"
+    assert product.capacity == "5 L"
+    assert product.voltage == "220 V"
+    assert product.power == "100 W"
+    assert product.frequency == "60 Hz"
+    assert product.battery == "Li-ion"
+    assert product.recharge == "USB-C"
+    assert product.connection == "Bluetooth"
+
+
 def test_missing_code_creates_review_identifier_without_inventing(tmp_path: Path) -> None:
     path = save_workbook(
         tmp_path / "missing-code.xlsx",

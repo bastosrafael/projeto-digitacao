@@ -5,7 +5,13 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.config import Settings, get_settings
-from app.services.upload_service import UploadSizeError, UploadValidationError, store_upload
+from app.services.upload_service import (
+    UploadMetadataError,
+    UploadSizeError,
+    UploadValidationError,
+    load_upload_metadata,
+    store_upload,
+)
 from app.services.spreadsheets import analyze_workbook
 from app.services.spreadsheets.parser import SpreadsheetParseError
 from app.services.spreadsheets.schemas import AnalysisResponse
@@ -23,6 +29,8 @@ class UploadResponse(BaseModel):
     filename: str
     stored_filename: str
     size_bytes: int
+    sha256: str
+    uploaded_at: str
     status: str
 
 
@@ -61,6 +69,34 @@ async def upload_spreadsheet(
         filename=stored.original_filename,
         stored_filename=stored.stored_filename,
         size_bytes=stored.size_bytes,
+        sha256=stored.sha256,
+        uploaded_at=stored.uploaded_at,
+        status="uploaded",
+    )
+
+
+@router.get("/{file_id}", response_model=UploadResponse)
+async def upload_metadata(
+    file_id: UUID,
+    settings: Settings = Depends(get_settings),
+) -> UploadResponse:
+    controlled_file_id = str(file_id)
+    try:
+        stored = load_upload_metadata(settings.upload_dir, controlled_file_id)
+    except UploadMetadataError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível consultar os metadados do upload.",
+        ) from exc
+    if stored is None or not (settings.upload_dir / stored.stored_filename).is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload não encontrado.")
+    return UploadResponse(
+        file_id=stored.file_id,
+        filename=stored.original_filename,
+        stored_filename=stored.stored_filename,
+        size_bytes=stored.size_bytes,
+        sha256=stored.sha256,
+        uploaded_at=stored.uploaded_at,
         status="uploaded",
     )
 

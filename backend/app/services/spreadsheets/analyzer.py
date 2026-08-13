@@ -4,6 +4,7 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from app.services.duimp_policy import prepare_product
 from app.services.spreadsheets.detector import DetectedSheet, detect_sheet
 from app.services.spreadsheets.images import extract_images
 from app.services.spreadsheets.normalization import clean_text, normalize_code
@@ -19,6 +20,8 @@ from app.services.spreadsheets.schemas import (
 
 PRODUCT_FIELD_ROLES = {
     "item_name", "ncm", "composition", "construction", "color", "size",
+    "purpose", "dimensions", "weight", "capacity", "voltage", "power",
+    "frequency", "battery", "recharge", "connection", "accessories",
     "manufacturer", "supplier", "brand", "packing_info",
 }
 TOTAL_MARKERS = {"total", "subtotal", "合计", "总计"}
@@ -99,6 +102,17 @@ def _product_for_row(
         construction=values["construction"],
         color=values["color"],
         size=values["size"],
+        purpose=values["purpose"],
+        dimensions=values["dimensions"],
+        weight=values["weight"],
+        capacity=values["capacity"],
+        voltage=values["voltage"],
+        power=values["power"],
+        frequency=values["frequency"],
+        battery=values["battery"],
+        recharge=values["recharge"],
+        connection=values["connection"],
+        accessories=values["accessories"],
         manufacturer=values["manufacturer"],
         supplier=values["supplier"],
         brand=values["brand"],
@@ -120,7 +134,12 @@ def _merge_product(target: Product, source: Product) -> None:
     for row in source.row_numbers:
         if row not in target.row_numbers:
             target.row_numbers.append(row)
-    for field in ("item_name", "ncm", "composition", "construction", "color", "size", "manufacturer", "supplier", "brand"):
+    for field in (
+        "item_name", "ncm", "composition", "construction", "color", "size",
+        "purpose", "dimensions", "weight", "capacity", "voltage", "power",
+        "frequency", "battery", "recharge", "connection", "accessories",
+        "manufacturer", "supplier", "brand",
+    ):
         if getattr(target, field) is None and getattr(source, field) is not None:
             setattr(target, field, getattr(source, field))
     for value in source.packing_info:
@@ -209,6 +228,8 @@ def analyze_workbook(path: Path, file_id: str) -> AnalysisResponse:
             _attach_image(products_by_key[key], image)
 
         products = sorted(products_by_key.values(), key=lambda product: (product.sheet_name, min(product.row_numbers)))
+        for product in products:
+            prepare_product(product)
         repeated_codes = {
             product.code: product.row_numbers
             for product in products
