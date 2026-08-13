@@ -1514,5 +1514,14 @@ resultados reais + dados da planilha
 - `compileall`, `pip check`, build Docker Python 3.12 e `git diff --check` passaram. Imagem local: 70.762.133 bytes.
 - Recursos após o piloto: host com aproximadamente 734 MiB disponíveis e 3,4 GiB de swap livre; backend de produção anterior em ~44 MiB e SearXNG dentro do limite de 512 MiB. Nenhum serviço adicional foi instalado.
 - `llm_used=false`; nenhuma chamada LLM, IA visual, DUIMP, browser headless, Firecrawl/Jina ou processamento em lote ocorreu.
-- **GATE LOCAL 6B.3 ATENDIDO.** Commit/deploy e validação do endpoint em produção ainda dependem da auditoria Git final desta execução.
-- Próxima etapa após produção saudável: decidir a integração das IAs gratuitas do OmniRoute para analisar exclusivamente Packing List + search real + conteúdo real + evidências estruturadas. Essa integração não foi iniciada.
+- **GATE 6B.3 ATENDIDO.** A auditoria Git confirmou ausência de XLSX/cache/HTML real/secret/CSS no commit; o único valor semelhante a credencial é o placeholder documental da chave OmniRoute.
+
+### Publicação e produção
+
+- Commit funcional `c24dd34 feat: adiciona enriquecimento de evidencias web` criado e enviado por push normal para `origin/main`; não houve force push.
+- O Auto Deploy não abriu fila. O redeploy seguro `m10b92rb0c3hpbe8mvtdlq4p` foi enfileirado no SHA completo `c24dd34d970f1ae171cbf9576504ce7a95399a1e` e terminou com sucesso.
+- Container `a59d986c21af` ficou healthy, preservando `127.0.0.1:18001:8000`, bind RW `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`, SearXNG, OmniRoute, Funnel 8443 e UI LOCKED.
+- `/health` local e público pelo Funnel retornaram HTTP 200. O endpoint público `/research/enrich`, somente para `WY-2026-Y13` e `N260308#`, retornou HTTP 200, provider `searxng-search`, seis search cache hits, zero gateway calls, ambos `NÃO_ENCONTRADO`, zero URLs aprovadas, zero fetches e `llm_used=false`.
+- O controle positivo foi repetido no código implantado sem persistir produto de teste: 3 search cache hits, 11 evidências aprovadas, 3 fetch cache hits e zero acesso de rede. A fonte `raspberrypi.com` permaneceu `BLOCKED`/HTTP 403; RoboCore e Geekworm permaneceram `OK`/HTTP 200 com `code`, `item_name`, `manufacturer` e `brand` encontrados e sem conflitos.
+- Recursos finais: backend ~56,75 MiB; SearXNG dentro do limite de 512 MiB; host com aproximadamente 762 MiB disponíveis e 3,4 GiB de swap livre. O cache de fetch permanece com ~20 KiB e arquivos modo 600.
+- Nenhuma IA, descrição DUIMP, fetch em lote ou crawler foi iniciado. Próxima etapa: decidir a integração das IAs gratuitas do OmniRoute para analisar exclusivamente Packing List + search real + conteúdo real + evidências estruturadas.
