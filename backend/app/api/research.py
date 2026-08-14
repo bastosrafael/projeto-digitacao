@@ -7,6 +7,8 @@ from app.config import Settings, get_settings
 from app.services.research.enrichment import EvidenceEnrichmentService
 from app.services.research.analysis import EvidenceAnalysisService
 from app.services.research.analysis_schemas import AnalysisRequest, AnalysisResponse
+from app.services.research.labels_multimodal import LabelsMultimodalService
+from app.services.research.labels_multimodal_schemas import LabelsMultimodalRequest, LabelsMultimodalResponse
 from app.services.research.multimodal import MultimodalAnalysisService
 from app.services.research.multimodal_schemas import MultimodalRequest, MultimodalResponse
 from app.services.research import ProductResearchService
@@ -18,7 +20,7 @@ from app.services.research.schemas import (
 )
 from app.services.spreadsheets import analyze_workbook
 from app.services.spreadsheets.parser import SpreadsheetParseError
-from app.services.spreadsheets.images import ProductImageError, extract_product_image_bytes
+from app.services.spreadsheets.images import ProductImageError, extract_label_image_bytes, extract_product_image_bytes
 
 router = APIRouter(prefix="/api/uploads", tags=["research"])
 
@@ -165,4 +167,78 @@ async def analyze_multimodal_evidence(
         enrichment,
         refresh_visual_cache=request.refresh_visual_cache,
         refresh_multimodal_cache=request.refresh_multimodal_cache,
+    )
+
+
+@router.post("/{file_id}/research/multimodal/labels", response_model=LabelsMultimodalResponse)
+async def analyze_labels_multimodal_evidence(
+    file_id: UUID,
+    request: LabelsMultimodalRequest,
+    settings: Settings = Depends(get_settings),
+) -> LabelsMultimodalResponse:
+    controlled_file_id, products = await _load_products(file_id, request.product_ids, settings)
+    path = settings.upload_dir / f"{controlled_file_id}.xlsx"
+
+    product_images: dict[str, object] = {}
+    wash_images: dict[str, object] = {}
+    hangtag_images: dict[str, object] = {}
+
+    for product in products:
+        product_images[product.product_id] = None
+        wash_images[product.product_id] = None
+        hangtag_images[product.product_id] = None
+
+        if product.code:
+            # PRODUCT_IMAGE (primeira disponível)
+            if product.images.product:
+                try:
+                    product_images[product.product_id] = await run_in_threadpool(
+                        extract_product_image_bytes, path, product.code, product.images.product[0]
+                    )
+                except ProductImageError:
+                    product_images[product.product_id] = "PRODUCT_IMAGE_INVALID"
+
+            # WASH_LABEL (primeira disponível)
+            if product.images.wash_labels:
+                try:
+                    wash_images[product.product_id] = await run_in_threadpool(
+                        extract_label_image_bytes, path, product.code, product.images.wash_labels[0]
+                    )
+                except ProductImageError:
+                    wash_images[product.product_id] = "WASH_LABEL_INVALID"
+
+            # HANGTAG (primeiro disponível)
+            if product.images.hangtags:
+                try:
+                    hangtag_images[product.product_id] = await run_in_threadpool(
+                        extract_label_image_bytes, path, product.code, product.images.hangtags[0]
+                    )
+                except ProductImageError:
+                    hangtag_images[product.product_id] = "HANGTAG_INVALID"
+
+    research = await ProductResearchService(settings).research(
+        controlled_file_id,
+        products,
+        max_queries_per_product=request.max_queries_per_product,
+        max_results_per_query=request.max_results_per_query,
+        refresh_cache=request.refresh_cache,
+    )
+    enrichment = await EvidenceEnrichmentService(settings).enrich(
+        controlled_file_id,
+        products,
+        research,
+        max_pages_per_product=request.max_pages_per_product,
+        refresh_fetch_cache=request.refresh_fetch_cache,
+    )
+    return await LabelsMultimodalService(settings).analyze(
+        controlled_file_id,
+        products,
+        product_images,
+        wash_images,
+        hangtag_images,
+        enrichment,
+        refresh_visual_cache=request.refresh_visual_cache,
+        refresh_wash_cache=request.refresh_wash_cache,
+        refresh_hangtag_cache=request.refresh_hangtag_cache,
+        refresh_labels_cache=request.refresh_labels_cache,
     )

@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     multimodal_analysis_cache_ttl_seconds: int = Field(default=604_800, ge=60)
     multimodal_analysis_timeout_seconds: float = Field(default=90.0, gt=0, le=180)
     multimodal_analysis_max_input_chars: int = Field(default=20_000, ge=4_000, le=40_000)
+    wash_label_cache_dir: Path = Path("/data/uploads/.wash-label-cache")
+    wash_label_cache_ttl_seconds: int = Field(default=604_800, ge=60)
+    hangtag_cache_dir: Path = Path("/data/uploads/.hangtag-cache")
+    hangtag_cache_ttl_seconds: int = Field(default=604_800, ge=60)
+    labels_multimodal_cache_dir: Path = Path("/data/uploads/.labels-multimodal-cache")
+    labels_multimodal_cache_ttl_seconds: int = Field(default=604_800, ge=60)
     max_upload_size_mb: int = Field(default=200, gt=0)
     upload_dir: Path = Path("/data/uploads")
     cors_allowed_origins: str = "https://projeto-digitacao.netlify.app"

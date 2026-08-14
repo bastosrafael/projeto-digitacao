@@ -53,6 +53,9 @@ class ProductImageError(ValueError):
     pass
 
 
+_LABEL_TYPES = frozenset({ImageClassification.WASH_LABEL, ImageClassification.HANGTAG})
+
+
 def _relations(workbook: WorkbookData, path: str) -> dict[str, str]:
     rels_path = posixpath.join(posixpath.dirname(path), "_rels", posixpath.basename(path) + ".rels")
     if rels_path not in workbook.archive.namelist():
@@ -139,6 +142,52 @@ def extract_product_image_bytes(
     """Recupera uma mídia já associada pelo parser, sem expor o ZIP fora desta abstração."""
     if image.classification is not ImageClassification.PRODUCT_IMAGE:
         raise ProductImageError("A imagem selecionada não é PRODUCT_IMAGE.")
+    if image.related_code != product_code:
+        raise ProductImageError("A imagem não está associada ao código solicitado.")
+    try:
+        with load_workbook(path) as workbook:
+            data = workbook.archive.read(image.media_reference)
+    except (KeyError, OSError, SpreadsheetParseError) as exc:
+        raise ProductImageError("Não foi possível recuperar a imagem associada.") from exc
+
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != image.sha256:
+        raise ProductImageError("O hash da imagem recuperada diverge da associação analisada.")
+    try:
+        with Image.open(io.BytesIO(data)) as opened:
+            image_format = (opened.format or "").upper()
+            width, height = opened.size
+    except (OSError, ValueError) as exc:
+        raise ProductImageError("A mídia associada não é uma imagem válida.") from exc
+    mime = {"JPEG": "image/jpeg", "PNG": "image/png"}.get(image_format)
+    if mime is None:
+        raise ProductImageError("Somente imagens JPEG e PNG são aceitas.")
+    return ExtractedProductImage(
+        image_id=image.image_id,
+        image_type=image.classification.value,
+        product_code=product_code,
+        sheet=image.sheet,
+        anchor_row=image.anchor_row,
+        anchor_column=image.anchor_column,
+        media_reference=image.media_reference,
+        data=data,
+        sha256=digest,
+        mime_type=mime,
+        width=width,
+        height=height,
+    )
+
+
+def extract_label_image_bytes(
+    path: Path,
+    product_code: str,
+    image: SpreadsheetImage,
+) -> ExtractedProductImage:
+    """Recupera bytes de WASH_LABEL ou HANGTAG associados pelo parser."""
+    if image.classification not in _LABEL_TYPES:
+        raise ProductImageError(
+            f"A imagem selecionada não é WASH_LABEL ou HANGTAG (é {image.classification.value})."
+        )
     if image.related_code != product_code:
         raise ProductImageError("A imagem não está associada ao código solicitado.")
     try:
