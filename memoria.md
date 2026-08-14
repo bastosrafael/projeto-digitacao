@@ -1783,3 +1783,91 @@ resultados reais + dados da planilha
 - Executar replay para confirmar cache hit.
 - Testar no máximo mais 1 produto real.
 - Não iniciar Fase 8, não gerar DUIMP, não processar lote, não alterar frontend.
+
+## 2026-08-14 — Checkpoint final do dia — pausa da Fase 7C por rate limit
+
+### Estado encerrado
+
+- **FASES 5A, 5B, 6A, 6B, 6B.3, 6C, 7A e 7B = CONCLUÍDAS.**
+- **FASE 7C = EM ANDAMENTO.** Infraestrutura, código, schemas, prompts, caches, endpoint, testes, deploy e documentação estão completos e validados. O piloto real com WASH_LABEL e HANGTAG está pendente por rate limit temporário do provider.
+- **FASE 8 = NÃO INICIADA.** Nenhuma descrição DUIMP foi gerada.
+- Lote NÃO executado. Frontend/UI LOCKED `fc53ebb` preservada.
+- Modelo visual: `oc/mimo-v2.5-free` (inalterado).
+- Modelo textual: `auto/coding:free` (inalterado).
+
+### Commits e produção
+
+- Último commit local: `cb791e5 docs: registra fase 7c - evidencias de etiquetas e hangtags`.
+- Último commit em `origin/main`: `cb791e5` (sincronizado, sem force push).
+- Commit em produção: `0d55f35 fix: corrige unpacking de contadores no servico de labels` (container `2b4a88057993`, healthy). O commit `cb791e5` é apenas documentação e não requer redeploy.
+- Working tree: limpa. Nenhum arquivo funcional pendente.
+
+### Arquivos da Fase 7C implementados
+
+- `backend/app/services/spreadsheets/images.py` — `extract_label_image_bytes` adicionada;
+- `backend/app/prompts/wash_label_extraction_v1.txt` — prompt de extração de wash label;
+- `backend/app/prompts/hangtag_extraction_v1.txt` — prompt de extração de hangtag;
+- `backend/app/prompts/labels_multimodal_analysis_v1.txt` — prompt de cross-evidence com labels;
+- `backend/app/services/research/label_schemas.py` — schemas Pydantic estritos para WashLabel/Hangtag;
+- `backend/app/services/research/label_analysis.py` — serviço de extração visual de labels;
+- `backend/app/services/research/labels_multimodal_schemas.py` — schemas do cross-evidence;
+- `backend/app/services/research/labels_multimodal.py` — serviço de cruzamento com labels;
+- `backend/app/config.py` — variáveis de cache para wash/hangtag/labels-multimodal;
+- `backend/app/api/research.py` — endpoint `POST /research/multimodal/labels`;
+- `backend/tests/test_labels_analysis.py` — 34 testes automatizados.
+
+### Testes
+
+- 134 testes passando (100 existentes + 34 novos da Fase 7C).
+- `compileall`, `pip check` limpos.
+- Nenhum teste existente quebrado.
+
+### Piloto WW77# — estado parcial
+
+- PRODUCT_IMAGE: cache HIT do piloto da Fase 7B. Status OK, modelo `mimo-v2.5-free`, atributos dress/pink preservados.
+- WASH_LABEL: **NÃO EXECUTADA.** A chamada `complete_vision_json` ao OmniRoute recebeu HTTP 429 (rate limit do provider Console/OpenCode). Label_status: `ERROR/OmniRouteError`.
+- HANGTAG: **NÃO EXECUTADA.** Mesma causa. Label_status: `ERROR/OmniRouteError`.
+- Cross-evidence textual: executada com apenas PACKING-001 e VISUAL-001 disponíveis. Primeira tentativa rejeitada pela validação (tentativa de confirmar `color` apenas com VISUAL). Segunda tentativa retornou JSON vazio. Resultado: `REVIEW/LOW`, `internal_support=NONE`, `external_support=NONE`.
+- **Nenhum dado real de WASH_LABEL ou HANGTAG foi obtido nesta sessão.**
+
+### Bloqueio atual
+
+- Classificação: `TEMPORARY_PROVIDER_RATE_LIMIT`.
+- O modelo visual gratuito `oc/mimo-v2.5-free` atingiu rate limit do provider (Console/OpenCode). O monitor registrou mais de 34 eventos consecutivos de `Still rate limited` ao longo de aproximadamente 20 minutos.
+- Isso NÃO implica erro do FastAPI, Coolify, SearXNG, código multimodal, necessidade de trocar modelo ou API paga.
+- O modelo foi previamente validado nas Fases 7A e 7B com sucesso.
+
+### Regra de preservação do modelo
+
+- NÃO trocar `OMNIROUTE_VISION_MODEL` sem decisão explícita do operador.
+- NÃO usar modelo pago.
+- O rate limit é temporário e deve ser aguardado.
+
+### Tarefa exata pendente para retomada
+
+Quando a cota do modelo visual gratuito estiver novamente disponível:
+
+1. Recuperar este estado (ler `memoria.md`, verificar health e produção);
+2. Confirmar container healthy e commit em produção;
+3. Executar SOMENTE a chamada pendente do piloto:
+   ```bash
+   curl -X POST https://nflnba.tail08f125.ts.net:8443/api/uploads/c21b5d16-d31f-4722-8c3b-213d19360be3/research/multimodal/labels \
+     -H 'Content-Type: application/json' \
+     -d '{"product_ids":["WW77#"]}'
+   ```
+4. Validar WASH_LABEL: raw_visible_text, composição, soma, size, status;
+5. Validar HANGTAG: raw_visible_text, brand, style_code, declared_color, status;
+6. Validar cross-evidence: confirmed_fields, conflicts, internal_support, external_support, decision;
+7. Executar replay para confirmar cache hit nas 3 camadas (wash, hangtag, labels-multimodal);
+8. Testar no máximo mais 1 produto real que possua WASH_LABEL ou HANGTAG;
+9. Concluir o gate da Fase 7C;
+10. Atualizar documentação;
+11. Não iniciar Fase 8 automaticamente.
+
+### Preservação de infraestrutura
+
+- Backend local `http://127.0.0.1:18001`, público `https://nflnba.tail08f125.ts.net:8443`.
+- Tailscale Funnel preservado: 443 -> NFLNBA e 8443 -> Projeto Digitação.
+- Storage persistente RW preservado: host `/opt/projeto-digitacao/data/uploads` -> container `/data/uploads`.
+- SearXNG preservado em `127.0.0.1:8888`; OmniRoute preservado na porta 20128.
+- UI aprovada e LOCKED no commit visual `fc53ebb`.
