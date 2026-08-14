@@ -1639,3 +1639,63 @@ resultados reais + dados da planilha
 - Wash label e hangtag poderão ser evidências mais fortes para composição, marca, instruções, modelo e tamanho, mas somente após leitura real; nada deve ser presumido.
 - Roadmap preservado: Fase 7 — análise visual e cruzamento multimodal; Fase 8 — descrição técnica objetiva para DUIMP; Fase 9 — Excel final para download. A Fase 7 não deve gerar descrição DUIMP.
 - **Nenhuma funcionalidade da Fase 7 foi iniciada neste checkpoint.**
+
+## 2026-08-14 — Fase 7A: auditoria multimodal e validação visual
+
+- OmniRoute `3.8.49` auditado sem alterar configuração global. O combo textual `auto/coding:free` não declarou suporte visual e permaneceu intacto.
+- Modelo gratuito visual comprovado: `oc/mimo-v2.5-free`, provider OpenCode. O modelo efetivo observado nas respostas foi `mimo-v2.5-free`.
+- Contrato validado: `POST /v1/chat/completions`, `stream=false`, content parts com `text` e `image_url`, usando data URL interna (`data:<mime>;base64,...`). Nenhuma imagem foi publicada.
+- Controle sintético de 384×256 e 15.987 bytes identificou corretamente triângulo vermelho, círculo azul e texto `Z7`, comprovando recepção real da imagem.
+- Produto real validado: file_id `c21b5d16-d31f-4722-8c3b-213d19360be3`, code `WW77#`, rows 2–3, sheet `Sheet1`, `IMG-00001`, âncora row 2/column 1, classificação `PRODUCT_IMAGE`.
+- Mídia real: `xl/media/image1.jpeg`, JPEG 154×199, 17.100 bytes, SHA-256 `6fa3ad3a23220d7f1a4bf9c2c5b41d6063b2302fba4d38a31017021bb52cf739`.
+- O produto também possui WASH_LABEL e HANGTAG associados, mas esses tipos não foram analisados. Não existe LABEL_IMAGE associada ao piloto.
+- A visão descreveu vestido rosa, comprimento aproximado até o joelho e detalhe de babado. Composição, NCM, fabricante, fornecedor e demais atributos invisíveis permaneceram desconhecidos.
+- Custo observado: US$ 0. A Fase 7A foi uma auditoria operacional; nenhuma imagem real, cache ou credencial foi versionada.
+
+## 2026-08-14 — Fase 7B: cruzamento multimodal de evidências
+
+### Arquitetura implementada
+
+- Criado `POST /api/uploads/{file_id}/research/multimodal`, limitado por schema a um ou dois produtos explicitamente selecionados. `/research`, `/research/enrich` e `/research/analyze` foram preservados.
+- Fluxo: produto estruturado -> associação PRODUCT_IMAGE da Fase 5B -> extração controlada dos bytes -> visão separada -> packing/search/web/visual com IDs -> análise textual final -> validação e calibração determinística.
+- `OMNIROUTE_VISION_MODEL` foi separado com fallback explícito `oc/mimo-v2.5-free`. `OMNIROUTE_MODEL=auto/coding:free` não foi alterado e continua como decisor textual final.
+- A abstração `extract_product_image_bytes` fica no módulo de imagens da planilha, valida classificação, related_code, SHA-256, MIME e dimensões e não expõe acesso ao OOXML/ZIP para a business logic.
+- Pré-processamento `visual-image-normalization-v1`: somente JPEG/PNG, uma imagem por produto, máximo padrão de 1 MiB e 1280 px no maior lado, sem upscaling. A imagem segue apenas como data URL interna ao OmniRoute.
+
+### Schemas, prompts e grounding
+
+- Prompt visual `visual-attribute-extraction-v1`; cache/analysis `visual-analysis-v1` em `/data/uploads/.visual-analysis-cache`, TTL sete dias. Chave: hash processado, code, prompt, modelo, tipo e preprocessing.
+- `VisualEvidence` Pydantic estrito registra `VISUAL-001`, image_id/type/code, hash/MIME/bytes/dimensões, modelo, prompt, métricas e confiança individual de categoria, cor, mangas, alças, comprimento e detalhes.
+- Composição, percentuais de fibra, NCM, fabricante, fornecedor, SKU, material químico, gramatura e propriedades internas são acrescentados deterministicamente a `unknown_attributes`. Texto visível é `UNTRUSTED DATA`, nunca instrução.
+- Prompt final `multimodal-evidence-analysis-v1`; cache/analysis `multimodal-analysis-v1` em `/data/uploads/.multimodal-analysis-cache`, TTL sete dias. Chave: produto normalizado, hash do pacote, prompt/version e rota textual.
+- Schema final estrito registra decisão/confiança, `internal_visual_match`, `external_support`, confirmed fields, conflitos, unknown fields, evidence IDs, modelos, latências e flags de uso.
+- Todos os IDs citados precisam existir e todos os valores precisam ocorrer na evidência citada. Campo invisível não pode ser comprovado somente por `VISUAL-001`, nem “lavado” pela inclusão de outro ID que não contenha o valor.
+- Conflitos conhecidos não podem ser omitidos e levam a `REVIEW`. Campo presente em `uncertain_attributes` visual é removido deterministicamente de `confirmed_fields` e volta a unknown.
+- `FOUND` exige apoio externo forte. Imagem consistente sem search/web suficiente produz `REVIEW`; sem apoio textual nem visual, `NOT_FOUND` permanece possível.
+
+### Piloto real único WW77#
+
+- File_id `c21b5d16-d31f-4722-8c3b-213d19360be3`; code `WW77#`; `IMG-00001`; `PRODUCT_IMAGE`; sheet `Sheet1`; row 2; column 1.
+- Imagem enviada: JPEG 154×199, 17.100 bytes, SHA-256 `6fa3ad3a23220d7f1a4bf9c2c5b41d6063b2302fba4d38a31017021bb52cf739`; request visual aproximado 24.919 bytes. Nenhuma normalização foi necessária.
+- Visão efetiva `mimo-v2.5-free`: category `dress` HIGH, primary color `pink` HIGH, length `knee-length` HIGH, details `ruffle neckline`, `floral pattern` e `cinched waist` HIGH. Straps ficou `UNKNOWN/LOW`; sleeves `off-the-shoulder` veio com alternativa `short sleeves` explicitamente incerta.
+- O cruzamento final removeu sleeves dos confirmados por incerteza. Resultado: `REVIEW/MEDIUM`, `internal_visual_match=UNCERTAIN`, `external_support=NONE`, sem conflitos materiais.
+- Confirmados pela Packing List: code, item_name, NCM, composição, construção e fabricante. Confirmados pela imagem: categoria visual, cor primária, comprimento e detalhes visíveis. A imagem não foi usada para sustentar composição, NCM ou fabricante.
+- IDs usados: `PACKING-001` e `VISUAL-001`. Search não encontrou evidência aprovada e nenhuma página web entrou no pacote final; isso impediu `FOUND`.
+- Execução fresca final: uma chamada visual e uma textual, `llm_used_visual=true`, `llm_used_text=true`; modelo textual efetivo `hy3-free`; latências observadas nessa execução 106 ms visual e 1.862 ms textual. Uma execução anterior não cacheada observou 5.617 ms visual; a variação pertence ao gateway/provider.
+- Replay idêntico: visual cache HIT, multimodal cache HIT, zero chamadas visuais, zero chamadas textuais, mesma decisão `REVIEW/MEDIUM`.
+- Container piloto local consumiu aproximadamente 54,8 MiB de RAM. Concorrência permaneceu 1 em cada camada. Custo US$ 0.
+
+### Validação, preservação e próximo passo
+
+- 100 testes backend passaram; cobertura nova inclui extração/associação/hash/MIME, normalização, schemas estritos, JSON inválido/retry, confiança por atributo, ambiguity, IDs inventados, conflitos, prompt injection, caches, ausência de imagem, MIME inválido, tamanho e proibição visual para composição.
+- `compileall`, `pip check`, build Docker e `git diff --check` passaram. Nenhum XLSX, imagem real, HTML, cache ou secret foi versionado.
+- Nenhum lote, OCR, WASH_LABEL/HANGTAG, LABEL_IMAGE, DUIMP, Fase 8, frontend, CSS ou layout foi implementado.
+- Commit funcional `ac17a9d feat: adiciona cruzamento multimodal de evidencias` criado e publicado em `origin/main` por push normal, sem force push. O Auto Deploy não iniciou.
+- Redeploy seguro `bab1o9ieeubql7chug25h40m`, `force_rebuild=false` e restrito a `applicationId=3`, terminou no SHA completo `ac17a9dcb58ff9a5112f3b8b8bc28713e6f49970`.
+- Novo container `7896d5937cb6` ficou healthy, preservando `127.0.0.1:18001:8000` e mount RW `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`. Health local e público pelo Funnel retornaram HTTP 200; a rota nova apareceu no OpenAPI.
+- A produção não possui override explícito para os modelos e usa os defaults documentados do código: `OMNIROUTE_MODEL=auto/coding:free` e `OMNIROUTE_VISION_MODEL=oc/mimo-v2.5-free`. Nenhuma configuração global do OmniRoute foi alterada.
+- Piloto fresco em produção: uma chamada visual e uma textual, `REVIEW/MEDIUM`, modelo visual efetivo `mimo-v2.5-free`, modelo textual efetivo `hy3-free`, 140 ms visual e 1.864 ms textual. Atributos e IDs foram idênticos ao piloto local saudável.
+- Replay público pelo Funnel: visual cache HIT, multimodal cache HIT, zero chamadas LLM e mesma decisão. Os dois arquivos de cache possuem modo 600; nenhum conteúdo ou imagem foi exposto.
+- Recursos após o replay: backend aproximadamente 64,0 MiB, SearXNG aproximadamente 44,4 MiB/512 MiB e host com aproximadamente 643 MiB disponíveis. Funnel 443 -> NFLNBA e 8443 -> Projeto Digitação permaneceu íntegro; health e consulta de jogos do NFLNBA continuaram HTTP 200.
+- **GATE DA FASE 7B ATENDIDO E VALIDADO EM PRODUÇÃO.** Backend, storage, Funnel, SearXNG privado, OmniRoute textual e UI LOCKED `fc53ebb` foram preservados.
+- Próxima etapa possível, somente com nova autorização: Fase 7C de expansão controlada ou etapa específica para WASH_LABEL/HANGTAG. Não iniciar automaticamente.
