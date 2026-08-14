@@ -435,7 +435,8 @@ class LabelsMultimodalService:
         enriched_by_id = {item.product_id: item for item in enrichment.products}
         results: list[ProductLabelsMultimodalResult] = []
 
-        visual_calls = wash_calls, hangtag_calls, text_calls = 0, 0, 0, 0
+        visual_calls = 0
+        wash_calls = hangtag_calls = text_calls = 0
         visual_hits = wash_hits = hangtag_hits = labels_hits = labels_misses = 0
 
         for product in products:
