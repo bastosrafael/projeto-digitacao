@@ -4,12 +4,20 @@ import hashlib
 import io
 import posixpath
 from dataclasses import dataclass
+from pathlib import Path
 from xml.etree import ElementTree
 
 from PIL import Image
 
 from app.services.spreadsheets.detector import DetectedSheet
-from app.services.spreadsheets.parser import PACKAGE_REL_NS, REL_NS, WorkbookData, resolve_target
+from app.services.spreadsheets.parser import (
+    PACKAGE_REL_NS,
+    REL_NS,
+    SpreadsheetParseError,
+    WorkbookData,
+    load_workbook,
+    resolve_target,
+)
 from app.services.spreadsheets.schemas import ImageClassification, SpreadsheetImage
 
 
@@ -23,6 +31,26 @@ class MediaDetails:
     sha256: str
     width: int | None
     height: int | None
+
+
+@dataclass(frozen=True)
+class ExtractedProductImage:
+    image_id: str
+    image_type: str
+    product_code: str
+    sheet: str
+    anchor_row: int
+    anchor_column: int
+    media_reference: str
+    data: bytes
+    sha256: str
+    mime_type: str
+    width: int
+    height: int
+
+
+class ProductImageError(ValueError):
+    pass
 
 
 def _relations(workbook: WorkbookData, path: str) -> dict[str, str]:
@@ -101,3 +129,47 @@ def extract_images(workbook: WorkbookData, sheets: list[DetectedSheet]) -> list[
                     )
                 )
     return images
+
+
+def extract_product_image_bytes(
+    path: Path,
+    product_code: str,
+    image: SpreadsheetImage,
+) -> ExtractedProductImage:
+    """Recupera uma mídia já associada pelo parser, sem expor o ZIP fora desta abstração."""
+    if image.classification is not ImageClassification.PRODUCT_IMAGE:
+        raise ProductImageError("A imagem selecionada não é PRODUCT_IMAGE.")
+    if image.related_code != product_code:
+        raise ProductImageError("A imagem não está associada ao código solicitado.")
+    try:
+        with load_workbook(path) as workbook:
+            data = workbook.archive.read(image.media_reference)
+    except (KeyError, OSError, SpreadsheetParseError) as exc:
+        raise ProductImageError("Não foi possível recuperar a imagem associada.") from exc
+
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != image.sha256:
+        raise ProductImageError("O hash da imagem recuperada diverge da associação analisada.")
+    try:
+        with Image.open(io.BytesIO(data)) as opened:
+            image_format = (opened.format or "").upper()
+            width, height = opened.size
+    except (OSError, ValueError) as exc:
+        raise ProductImageError("A mídia associada não é uma imagem válida.") from exc
+    mime = {"JPEG": "image/jpeg", "PNG": "image/png"}.get(image_format)
+    if mime is None:
+        raise ProductImageError("Somente imagens JPEG e PNG são aceitas.")
+    return ExtractedProductImage(
+        image_id=image.image_id,
+        image_type=image.classification.value,
+        product_code=product_code,
+        sheet=image.sheet,
+        anchor_row=image.anchor_row,
+        anchor_column=image.anchor_column,
+        media_reference=image.media_reference,
+        data=data,
+        sha256=digest,
+        mime_type=mime,
+        width=width,
+        height=height,
+    )

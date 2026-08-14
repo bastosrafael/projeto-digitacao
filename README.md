@@ -87,6 +87,29 @@ No piloto real controlado de 13/08/2026, `Raspberry Pi 5` reutilizou três searc
 
 A Fase 6C foi implantada no Coolify pelo deployment `jxrd20pmzanimoj4r3sgmh5n`, commit `d1d125d`, sem force rebuild. Em produção, health local/público e o endpoint público de análise retornaram HTTP 200. O controle positivo no código implantado retornou `FOUND/HIGH` com o modelo efetivo `big-pickle`; o replay retornou analysis cache `HIT`, `llm_calls=0` e `llm_used=false`. `WY-2026-Y13` e `N260308#` retornaram `NOT_FOUND/LOW`, `SKIP`, zero chamadas e `llm_used=false` tanto localmente quanto pelo Funnel.
 
+### Fases 7A/7B — visão isolada e cruzamento multimodal
+
+A auditoria da Fase 7A validou no OmniRoute 3.8.49 o modelo gratuito visual `oc/mimo-v2.5-free`. O contrato comprovado é `POST /v1/chat/completions` com content parts OpenAI-compatible: uma parte `text` e uma parte `image_url` contendo data URL interna. A imagem não precisa ser publicada. A rota textual `OMNIROUTE_MODEL=auto/coding:free` permanece inalterada e não é usada para extrair atributos visuais.
+
+O endpoint controlado da Fase 7B é:
+
+```http
+POST /api/uploads/{file_id}/research/multimodal
+```
+
+A requisição exige seleção explícita de um ou dois produtos. Para cada produto, o backend reutiliza a associação `code -> row -> PRODUCT_IMAGE` da Fase 5B, recupera somente a primeira `PRODUCT_IMAGE`, normaliza JPEG/PNG quando necessário para no máximo 1 MiB e lado máximo de 1280 px, e envia os bytes por data URL ao modelo configurado em `OMNIROUTE_VISION_MODEL`. Não existe endpoint público de imagem, OCR, análise de wash label/hangtag, lote ou geração de descrição DUIMP.
+
+O prompt `visual-attribute-extraction-v1` e o schema `VisualEvidence` aceitam somente categoria visual, cor principal, mangas, alças, comprimento e detalhes visíveis, cada atributo com confiança própria. Composição, percentuais, NCM, fabricante, fornecedor, SKU, material químico, gramatura e propriedades internas entram deterministicamente como desconhecidos. Texto presente na imagem é `UNTRUSTED DATA`, nunca instrução. Ambiguidades ficam em `uncertain_attributes`; campos visuais incertos não são promovidos no resultado final.
+
+Depois da visão, o backend cruza Packing List, search aprovado, páginas enriquecidas e `VISUAL-001` usando exclusivamente o modelo textual configurado por `OMNIROUTE_MODEL`. O prompt separado `multimodal-evidence-analysis-v1` produz schema estrito com `FOUND`, `REVIEW` ou `NOT_FOUND`, `internal_visual_match`, `external_support`, `confirmed_fields`, `conflicts`, `unknown_fields` e proveniência completa. IDs inexistentes, valores sem suporte e tentativa de comprovar campo invisível com visão são rejeitados; conflitos forçam `REVIEW`. Uma imagem não promove sozinha ausência de apoio externo para `FOUND`.
+
+Os caches também são independentes:
+
+- `visual-analysis-v1`: `/data/uploads/.visual-analysis-cache`, chave por hash da imagem, code, modelo, prompt, tipo e preprocessing, TTL de sete dias;
+- `multimodal-analysis-v1`: `/data/uploads/.multimodal-analysis-cache`, chave por produto normalizado, hash do pacote, prompt, versão e modelo textual, TTL de sete dias.
+
+No piloto único com `WW77#`, `IMG-00001` (JPEG, 154×199, 17.100 bytes), a visão retornou vestido rosa na altura dos joelhos, detalhes de babado/estampa/cintura e marcou a interpretação das mangas como incerta; alças permaneceram `UNKNOWN`. O cruzamento retornou `REVIEW/MEDIUM`, `internal_visual_match=UNCERTAIN` e `external_support=NONE`. Packing e visual foram preservados por `PACKING-001` e `VISUAL-001`; composição, NCM e fabricante foram sustentados somente pela Packing List, nunca pela imagem. O replay teve cache hit nas duas camadas e zero chamadas LLM.
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
@@ -354,6 +377,7 @@ cd /opt/projeto-digitacao/backend
 - `OMNIROUTE_BASE_URL`: URL base OpenAI-compatible, incluindo `/v1`.
 - `OMNIROUTE_API_KEY`: chave usada somente pelo backend; pode ficar vazia se a instância local não exigir autenticação.
 - `OMNIROUTE_MODEL`: modelo ou rota configurável (padrão `auto/coding:free`).
+- `OMNIROUTE_VISION_MODEL`: modelo visual separado (padrão gratuito validado `oc/mimo-v2.5-free`).
 - `OMNIROUTE_TIMEOUT_SECONDS`: timeout por tentativa.
 - `OMNIROUTE_MAX_RETRIES`: quantidade de novas tentativas (0 a 5).
 - `SEARCH_PROVIDER`: provider explícito do Search Gateway (padrão `searxng-search`).
@@ -367,6 +391,15 @@ cd /opt/projeto-digitacao/backend
 - `LLM_ANALYSIS_CACHE_TTL_SECONDS`: validade do cache de análise (padrão sete dias).
 - `LLM_ANALYSIS_TIMEOUT_SECONDS`: timeout da única tentativa de transporte por chamada (padrão 90 segundos).
 - `LLM_ANALYSIS_MAX_INPUT_CHARS`: limite do JSON de evidências enviado ao modelo (padrão 18.000 caracteres).
+- `VISUAL_ANALYSIS_CACHE_DIR`: cache privado da visão (padrão `/data/uploads/.visual-analysis-cache`).
+- `VISUAL_ANALYSIS_CACHE_TTL_SECONDS`: validade do cache visual (padrão sete dias).
+- `VISUAL_ANALYSIS_TIMEOUT_SECONDS`: timeout da chamada visual (padrão 90 segundos).
+- `VISUAL_IMAGE_MAX_BYTES`: limite após normalização (padrão 1 MiB).
+- `VISUAL_IMAGE_MAX_SIDE`: maior lado após normalização (padrão 1280 px, sem ampliação).
+- `MULTIMODAL_ANALYSIS_CACHE_DIR`: cache privado do cruzamento (padrão `/data/uploads/.multimodal-analysis-cache`).
+- `MULTIMODAL_ANALYSIS_CACHE_TTL_SECONDS`: validade do cache multimodal (padrão sete dias).
+- `MULTIMODAL_ANALYSIS_TIMEOUT_SECONDS`: timeout da análise textual final (padrão 90 segundos).
+- `MULTIMODAL_ANALYSIS_MAX_INPUT_CHARS`: limite do pacote final (padrão 20.000 caracteres).
 - `LOG_LEVEL`: nível de log.
 
 O cliente HTTP não segue redirecionamentos, aplica timeout, retry limitado para falhas transitórias e nunca registra a chave nos logs.
@@ -438,6 +471,7 @@ Configure as seguintes variáveis no painel do Coolify, sem colocá-las no repos
 OMNIROUTE_BASE_URL=http://192.168.15.112:20128/v1
 OMNIROUTE_API_KEY=<segredo-configurado-no-coolify>
 OMNIROUTE_MODEL=auto/coding:free
+OMNIROUTE_VISION_MODEL=oc/mimo-v2.5-free
 MAX_UPLOAD_SIZE_MB=200
 UPLOAD_DIR=/data/uploads
 CORS_ALLOWED_ORIGINS=https://projeto-digitacao.netlify.app

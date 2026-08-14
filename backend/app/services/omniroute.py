@@ -150,6 +150,50 @@ class OmniRouteService:
                     raise OmniRouteError("Resposta inválida na análise de evidências.") from exc
         raise OmniRouteError("Falha inesperada na análise de evidências.")
 
+    async def complete_vision_json(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        timeout_seconds: float,
+    ) -> OmniRouteCompletion:
+        """Solicita JSON ao modelo visual separado usando content parts OpenAI-compatible."""
+        url = f"{self.settings.omniroute_base_url.rstrip('/')}/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if self.settings.omniroute_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.omniroute_api_key}"
+        payload: dict[str, Any] = {
+            "model": self.settings.omniroute_vision_model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "stream": False,
+            "temperature": 0,
+        }
+        started = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                if not isinstance(content, str) or not content.strip():
+                    raise ValueError("resposta visual sem conteúdo textual")
+                model = data.get("model")
+                return OmniRouteCompletion(
+                    content=content,
+                    model=model if isinstance(model, str) and model else None,
+                    latency_ms=round((time.monotonic() - started) * 1000),
+                )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            logger.error("Falha de rede na análise visual: %s", type(exc).__name__)
+            raise OmniRouteError("Falha temporária na análise visual.", 504) from exc
+        except httpx.HTTPStatusError as exc:
+            logger.error("OmniRoute recusou análise visual com HTTP %s", exc.response.status_code)
+            status_code = 429 if exc.response.status_code == 429 else 502
+            raise OmniRouteError("Falha temporária na análise visual.", status_code) from exc
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            logger.error("Resposta inválida do OmniRoute na análise visual")
+            raise OmniRouteError("Resposta inválida na análise visual.") from exc
+
     async def search(
         self,
         query: str,
