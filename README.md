@@ -110,6 +110,27 @@ Os caches também são independentes:
 
 No piloto único com `WW77#`, `IMG-00001` (JPEG, 154×199, 17.100 bytes), a visão retornou vestido rosa na altura dos joelhos, detalhes de babado/estampa/cintura e marcou a interpretação das mangas como incerta; alças permaneceram `UNKNOWN`. O cruzamento retornou `REVIEW/MEDIUM`, `internal_visual_match=UNCERTAIN` e `external_support=NONE`. Packing e visual foram preservados por `PACKING-001` e `VISUAL-001`; composição, NCM e fabricante foram sustentados somente pela Packing List, nunca pela imagem. O replay teve cache hit nas duas camadas e zero chamadas LLM.
 
+### Fase 7C — evidências de etiquetas e hangtags
+
+O endpoint complementar `POST /api/uploads/{file_id}/research/multimodal/labels` preserva todos os contratos existentes e adiciona extração estruturada de `WASH_LABEL` e `HANGTAG` associados pela Fase 5B. Produtos sem etiqueta ou hangtag continuam processáveis; a ausência não derruba o pipeline.
+
+O fluxo encadeia: Packing List -> PRODUCT_IMAGE -> WASH_LABEL -> HANGTAG -> search -> web -> cruzamento textual final. Cada camada de extração visual é independente e usa o modelo visual `OMNIROUTE_VISION_MODEL`. Falhas individuais geram `label_status=ERROR` e o pipeline continua com as evidências disponíveis.
+
+Os prompts são separados e versionados:
+
+- `wash-label-extraction-v1`: transcrição legível, composição com percentuais somente quando claramente legíveis, validação matemática da soma, preservação do idioma original, `UNKNOWN` para texto ilegível;
+- `hangtag-extraction-v1`: marca, style/code, tamanho, cor declarada, barcode candidato (sem validação GTIN), composição quando explicitamente impressa.
+
+Os schemas Pydantic são estritos (`extra="forbid"`): `WashLabelEvidence` e `HangtagEvidence` registram `raw_visible_text`, campos extraídos com confiança individual, `uncertain_text`, `composition_sum`, `composition_sum_valid` e `warnings`. Soma de composição diferente de 100 gera `composition_percentage_sum_invalid` sem correção automática.
+
+Proveniência usa `WASH-001` e `HANGTAG-001` como evidence IDs, preservando `PACKING-001`, `SEARCH-*`, `WEB-*` e `VISUAL-001`. O cruzamento final calcula `internal_support` (STRONG/MODERATE/WEAK/NONE) baseado na consistência entre Packing, PRODUCT_IMAGE, WASH_LABEL e HANGTAG, e `external_support` independente. Decisão conservadora: `FOUND` exige suporte externo forte ou suporte interno forte com labels corroboradas. Conflitos entre Packing e Wash (ex.: composição diferente) são registrados e forçam `REVIEW`.
+
+Caches separados:
+
+- `wash-label-analysis-v1`: `/data/uploads/.wash-label-cache`, TTL sete dias;
+- `hangtag-analysis-v1`: `/data/uploads/.hangtag-cache`, TTL sete dias;
+- `labels-multimodal-analysis-v1`: `/data/uploads/.labels-multimodal-cache`, TTL sete dias.
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
@@ -400,6 +421,12 @@ cd /opt/projeto-digitacao/backend
 - `MULTIMODAL_ANALYSIS_CACHE_TTL_SECONDS`: validade do cache multimodal (padrão sete dias).
 - `MULTIMODAL_ANALYSIS_TIMEOUT_SECONDS`: timeout da análise textual final (padrão 90 segundos).
 - `MULTIMODAL_ANALYSIS_MAX_INPUT_CHARS`: limite do pacote final (padrão 20.000 caracteres).
+- `WASH_LABEL_CACHE_DIR`: cache privado da extração de wash labels (padrão `/data/uploads/.wash-label-cache`).
+- `WASH_LABEL_CACHE_TTL_SECONDS`: validade do cache de wash labels (padrão sete dias).
+- `HANGTAG_CACHE_DIR`: cache privado da extração de hangtags (padrão `/data/uploads/.hangtag-cache`).
+- `HANGTAG_CACHE_TTL_SECONDS`: validade do cache de hangtags (padrão sete dias).
+- `LABELS_MULTIMODAL_CACHE_DIR`: cache privado do cruzamento com labels (padrão `/data/uploads/.labels-multimodal-cache`).
+- `LABELS_MULTIMODAL_CACHE_TTL_SECONDS`: validade do cache de cruzamento com labels (padrão sete dias).
 - `LOG_LEVEL`: nível de log.
 
 O cliente HTTP não segue redirecionamentos, aplica timeout, retry limitado para falhas transitórias e nunca registra a chave nos logs.

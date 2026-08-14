@@ -1699,3 +1699,87 @@ resultados reais + dados da planilha
 - Recursos após o replay: backend aproximadamente 64,0 MiB, SearXNG aproximadamente 44,4 MiB/512 MiB e host com aproximadamente 643 MiB disponíveis. Funnel 443 -> NFLNBA e 8443 -> Projeto Digitação permaneceu íntegro; health e consulta de jogos do NFLNBA continuaram HTTP 200.
 - **GATE DA FASE 7B ATENDIDO E VALIDADO EM PRODUÇÃO.** Backend, storage, Funnel, SearXNG privado, OmniRoute textual e UI LOCKED `fc53ebb` foram preservados.
 - Próxima etapa possível, somente com nova autorização: Fase 7C de expansão controlada ou etapa específica para WASH_LABEL/HANGTAG. Não iniciar automaticamente.
+
+## 2026-08-14 — Fase 7C: evidências de etiquetas e hangtags
+
+### Arquitetura implementada
+
+- Criado `POST /api/uploads/{file_id}/research/multimodal/labels`, limitado a 1 ou 2 produtos. Todos os endpoints existentes (`/research`, `/research/enrich`, `/research/analyze`, `/research/multimodal`) foram preservados sem alteração.
+- Fluxo: produto estruturado -> associação PRODUCT_IMAGE/WASH_LABEL/HANGTAG da Fase 5B -> extração controlada dos bytes -> visão separada para cada tipo -> search/enrich -> pacote de evidências com IDs -> cruzamento textual final -> validação e calibração determinística.
+- Generalizada `extract_label_image_bytes` em `backend/app/services/spreadsheets/images.py`, aceitando `WASH_LABEL` e `HANGTAG` com a mesma validação de hash, MIME e dimensões da `extract_product_image_bytes`.
+- Prompts separados e versionados:
+  - `wash-label-extraction-v1` em `backend/app/prompts/wash_label_extraction_v1.txt`;
+  - `hangtag-extraction-v1` em `backend/app/prompts/hangtag_extraction_v1.txt`;
+  - `labels-multimodal-analysis-v1` em `backend/app/prompts/labels_multimodal_analysis_v1.txt`.
+- Schemas Pydantic estritos (`extra="forbid"`): `WashLabelEvidence`, `HangtagEvidence`, `LlmLabelsCrossAnalysis`, `ProductLabelsMultimodalResult` e `LabelsMultimodalResponse` em módulos separados (`label_schemas.py`, `labels_multimodal_schemas.py`).
+- O campo `model` do `LlmHangtagAttributes` (LabeledField para "model" do produto) foi renomeado para `model_used` no `HangtagEvidence` para evitar colisão com o parâmetro `model` (nome do modelo de IA).
+
+### Serviço de análise de labels
+
+- Criado `label_analysis.py` com `LabelAnalysisService`. Reutiliza `prepare_image` do `visual_analysis.py` para normalização JPEG/PNG (máximo 1 MiB, 1280 px).
+- Cada tipo (wash/hangtag) usa seu próprio prompt e schema de validação.
+- `_calibrate_wash`: valida soma de composição, adiciona `composition_percentage_sum_invalid` quando soma ≠ 100, completa `unknown_fields`.
+- `_calibrate_hangtag`: idem para composição em hangtag, completa `unknown_fields`.
+- Status explícitos: `OK`, `UNREADABLE`, `PARTIAL`, `UNSUPPORTED`, `ERROR`, `NO_IMAGE`.
+- Concorrência 1 por semáforo global. Timeout do visual model existente.
+
+### Cross-evidence com labels
+
+- Criado `labels_multimodal.py` com `LabelsMultimodalService`.
+- `_compute_internal_support`: critérios determinísticos baseados em confirmação de code/style entre Packing + Hangtag, compatibilidade de composição entre Packing + Wash, confirmação de cor/brand/size, presença de sinais visuais.
+- `_compute_external_support`: reutiliza a lógica existente (search/web).
+- `_validate_labels_analysis`: valida evidence IDs, rejeita VISUAL comprovando campos invisíveis, detecta conflitos Packing x Wash automaticamente e os injeta na resposta.
+- Decisão conservadora: `FOUND` rebaixado para `REVIEW` quando suporte externo insuficiente mesmo com interno forte. Conflitos forçam `REVIEW`.
+
+### Caches
+
+- `wash-label-analysis-v1`: `/data/uploads/.wash-label-cache`, TTL 7 dias, chave por hash da imagem + code + modelo + prompt + tipo + preprocessing;
+- `hangtag-analysis-v1`: `/data/uploads/.hangtag-cache`, mesma estrutura;
+- `labels-multimodal-analysis-v1`: `/data/uploads/.labels-multimodal-cache`, chave por produto normalizado + hash do pacote + prompt + versão + modelo textual.
+
+### Configuração
+
+- Variáveis adicionadas ao `config.py`: `wash_label_cache_dir`, `wash_label_cache_ttl_seconds`, `hangtag_cache_dir`, `hangtag_cache_ttl_seconds`, `labels_multimodal_cache_dir`, `labels_multimodal_cache_ttl_seconds`.
+
+### Testes automatizados
+
+- Suíte ampliada de 100 para 134 testes, todos passando.
+- Casos novos em `test_labels_analysis.py` (34 testes):
+  - Composition sum: soma 100 válida, soma inválida, sem percentuais;
+  - Wash calibration: soma inválida gera warning, soma válida sem warning, unknown fields populados, ilegitibilidade, fibra chinesa preservada;
+  - Hangtag calibration: unknown fields, code confirmado fora de unknown;
+  - Wash analysis service: extração completa, cache hit, unreadable, partial text;
+  - Hangtag analysis service: extração, barcode;
+  - Retry: JSON inválido + válido, duas falhas;
+  - Prompt injection: texto em raw_text preservado como dado, schema rejeita extra keys;
+  - Extract label image: rejeita PRODUCT_IMAGE;
+  - Cross-evidence validation: análise válida, ID inválido rejeitado, VISUAL não comprova composição, conflito Packing x Wash detectado;
+  - Produtos sem labels;
+  - Schemas estritos: request max 2 produtos, extra fields rejeitados.
+
+### Piloto WW77# em produção
+
+- Container `2b4a8805799d` healthy, commit `0d55f35`, `127.0.0.1:18001:8000`, mount RW preservado, Funnel `:8443` OK.
+- PRODUCT_IMAGE: cache HIT (do piloto da Fase 7B), `mimo-v2.5-free`, status OK, dress/pink.
+- WASH_LABEL: `OmniRouteError` (HTTP 429 do provider do modelo visual gratuito); label_status `ERROR`.
+- HANGTAG: `OmniRouteError` (HTTP 429); label_status `ERROR`.
+- O modelo textual recebeu apenas PACKING-001 e VISUAL-001, tentou confirmar `color` apenas com VISUAL (rejeitado pela validação), e na segunda tentativa retornou JSON vazio.
+- Resultado final: `REVIEW/LOW`, `internal_support=NONE`, `external_support=NONE`, zero labels processadas.
+- **GATE DA FASE 7C PARCIALMENTE ATENDIDO:** infraestrutura, código, schemas, prompts, caches, endpoint e testes estão completos e validados. O piloto completo depende do rate limit do modelo visual gratuito `mimo-v2.5-free` resetar para que WASH_LABEL e HANGTAG possam ser analisadas.
+- **O piloto real completo precisa ser repetido quando o rate limit expirar.**
+
+### Preservação
+
+- Frontend UI LOCKED `fc53ebb` preservada; nenhum CSS/componente alterado.
+- Todos os endpoints anteriores preservados sem alteração de contrato.
+- SearXNG (`127.0.0.1:8888`), OmniRoute textual (`auto/coding:free`) e visual (`oc/mimo-v2.5-free`), Funnel, NFLNBA, bind e mount não foram alterados.
+- Commits: `ffc63e9 feat: adiciona evidencias de etiquetas e hangtags` e `0d55f35 fix: corrige unpacking de contadores no servico de labels`.
+- 134 testes passando; `compileall` e `pip check` limpos.
+
+### Próximo passo
+
+- Repetir o piloto WW77# quando o rate limit do `mimo-v2.5-free` resetar.
+- Validar WASH_LABEL e HANGTAG extraídos com sucesso.
+- Executar replay para confirmar cache hit.
+- Testar no máximo mais 1 produto real.
+- Não iniciar Fase 8, não gerar DUIMP, não processar lote, não alterar frontend.
