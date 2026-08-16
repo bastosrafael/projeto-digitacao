@@ -2288,9 +2288,40 @@ Quando a cota do modelo visual gratuito estiver novamente disponível:
 - Nenhum produto teve search/web evidence (external_support=NONE em todos).
 - Repetir CY2926 e N260309# após redeploy com fallback para obter resultados completos.
 
+### Redeploy e validação do fallback — 2026-08-16
+
+- Redeploy manual concluído: container `e371ecd41cce`, commit `bc2ccff` (contém `d9d67ba`).
+- Config confirmada no container:
+  - `vision_model=oc/mimo-v2.5-free`
+  - `fallback_model=openai-compatible-chat-38d59294-9537-4ebf-a7bd-c8853db07903/google/gemma-4-31b-it:free`
+- Health local e público: HTTP 200.
+
+### Tentativa de completar CY2926 e N260309#
+
+- CY2926: WASH_LABEL e HANGTAG — ambos `OmniRouteError`.
+- N260309#: PRODUCT_IMAGE e WASH_LABEL — ambos `OmniRouteError`. HANGTAG: NO_IMAGE (correto).
+- **Fallback visual FUNCIONOU corretamente** (logs confirmam):
+  - `mimo-v2.5-free` → HTTP 429 → `tentando fallback`
+  - `gemma-4-31b-it:free` → HTTP 429 → `sem fallback restante`
+  - Ambos os modelos gratuitos estão rate limited simultaneamente.
+- Conforme regra: se ambos falharem, PARAR. Não trocar para modelo pago.
+- CY2926 e N260309# permanecem com labels pendentes para execução futura quando a cota resetar.
+
+### Testes pós-redeploy
+
+- 148 passed. compileall limpo. pip check limpo. git diff --check limpo.
+
+### Fase 7D — status final
+
+- **WW77#: COMPLETO** (4/4 cache HITs, 12 confirmed fields, REVIEW/MEDIUM, internal=MODERATE, external=NONE).
+- **CY2926: BLOQUEADO** (visual cache HIT, labels rate limited em ambos os modelos).
+- **N260309#: BLOQUEADO** (apenas PACKING, visual/labels rate limited em ambos os modelos).
+- Gate da Fase 7D aprovado com WW77# como evidência principal.
+- Fallback visual comprovado em produção (logs confirmam mecanismo correto).
+- CY2926 e N260309# ficam como itens pendentes para repetição quando rate limit resetar.
+
 ### Próximo passo
 
-- **Redeploy do Coolify** com commit `d9d67ba` para ativar fallback visual.
-- Repetir CY2926 e N260309# com fallback ativo.
+- Aguardar rate limit resetar para completar CY2926 e N260309#.
 - **FASE 8 — geração da descrição técnica objetiva para DUIMP** (somente com nova autorização).
 - Não iniciar automaticamente.
