@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     omniroute_api_key: str = ""
     omniroute_model: str = "auto/coding:free"
     omniroute_vision_model: str = "oc/mimo-v2.5-free"
+    omniroute_vision_fallback_model: str = (
+        "openai-compatible-chat-38d59294-9537-4ebf-a7bd-c8853db07903/google/gemma-4-31b-it:free"
+    )
     omniroute_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
     omniroute_max_retries: int = Field(default=2, ge=0, le=5)
     search_provider: str = "searxng-search"

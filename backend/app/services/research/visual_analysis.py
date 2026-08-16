@@ -215,6 +215,8 @@ class VisualAnalysisService:
         calls = 0
         latency = 0
         model = self.settings.omniroute_vision_model
+        fallback_used = False
+        fallback_reason = None
         last_error = "INVALID_VISUAL_JSON"
         validated: LlmVisualAttributes | None = None
         for attempt in range(2):
@@ -226,6 +228,8 @@ class VisualAnalysisService:
                 calls += 1
                 latency += completion.latency_ms
                 model = completion.model or model
+                fallback_used = completion.fallback_used
+                fallback_reason = completion.fallback_reason
                 validated = _calibrate_visual(
                     LlmVisualAttributes.model_validate(_parse_json(completion.content))
                 )
@@ -255,9 +259,9 @@ class VisualAnalysisService:
         )
         self.cache.put(cache_key, evidence.model_dump(mode="json"))
         logger.info(
-            "visual_analysis file_id=%s code=%s image_id=%s image_hash=%s bytes=%s mime=%s dimensions=%sx%s request_bytes=%s prompt=%s model=%s llm_used=true cache=MISS latency_ms=%s",
+            "visual_analysis file_id=%s code=%s image_id=%s image_hash=%s bytes=%s mime=%s dimensions=%sx%s request_bytes=%s prompt=%s model=%s fallback_used=%s fallback_reason=%s llm_used=true cache=MISS latency_ms=%s",
             file_id, image.product_code, image.image_id, prepared.sha256, len(prepared.data),
             prepared.mime_type, prepared.width, prepared.height, request_size, PROMPT_VERSION,
-            model, latency,
+            model, fallback_used, fallback_reason, latency,
         )
         return evidence, calls, 0, 1

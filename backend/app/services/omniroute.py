@@ -25,6 +25,8 @@ class OmniRouteCompletion:
     content: str
     model: str | None
     latency_ms: int
+    fallback_used: bool = False
+    fallback_reason: str | None = None
 
 
 class OmniRouteService:
@@ -156,43 +158,87 @@ class OmniRouteService:
         *,
         timeout_seconds: float,
     ) -> OmniRouteCompletion:
-        """Solicita JSON ao modelo visual separado usando content parts OpenAI-compatible."""
+        """Solicita JSON ao modelo visual separado usando content parts OpenAI-compatible.
+
+        Quando o modelo principal falha por erro transitório (rate limit, timeout
+        ou indisponibilidade do provider) e existe um modelo de fallback
+        configurado, tenta automaticamente o fallback. Erros de validação ou
+        JSON inválido não acionam fallback.
+        """
         url = f"{self.settings.omniroute_base_url.rstrip('/')}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self.settings.omniroute_api_key:
             headers["Authorization"] = f"Bearer {self.settings.omniroute_api_key}"
-        payload: dict[str, Any] = {
-            "model": self.settings.omniroute_vision_model,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            "stream": False,
-            "temperature": 0,
-        }
+
+        primary_model = self.settings.omniroute_vision_model
+        fallback_model = self.settings.omniroute_vision_fallback_model
+
         started = time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                if not isinstance(content, str) or not content.strip():
-                    raise ValueError("resposta visual sem conteúdo textual")
-                model = data.get("model")
-                return OmniRouteCompletion(
-                    content=content,
-                    model=model if isinstance(model, str) and model else None,
-                    latency_ms=round((time.monotonic() - started) * 1000),
+        transient_reason: str | None = None
+
+        candidates = [(primary_model, False)]
+        if fallback_model:
+            candidates.append((fallback_model, True))
+
+        for model_id, is_fallback in candidates:
+            payload: dict[str, Any] = {
+                "model": model_id,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+                "stream": False,
+                "temperature": 0,
+            }
+            try:
+                async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
+                    response = await client.post(url, headers=headers, json=payload)
+                    if response.status_code == 429 or response.status_code >= 500:
+                        transient_reason = (
+                            "RATE_LIMIT" if response.status_code == 429
+                            else f"HTTP_{response.status_code}"
+                        )
+                        logger.warning(
+                            "Modelo visual %s retornou HTTP %s; %s",
+                            model_id, response.status_code,
+                            "tentando fallback" if not is_fallback else "sem fallback restante",
+                        )
+                        if is_fallback:
+                            break
+                        continue
+                    response.raise_for_status()
+                    data = response.json()
+                    content = data["choices"][0]["message"]["content"]
+                    if not isinstance(content, str) or not content.strip():
+                        raise ValueError("resposta visual sem conteúdo textual")
+                    effective = data.get("model")
+                    return OmniRouteCompletion(
+                        content=content,
+                        model=effective if isinstance(effective, str) and effective else model_id,
+                        latency_ms=round((time.monotonic() - started) * 1000),
+                        fallback_used=is_fallback,
+                        fallback_reason=transient_reason if is_fallback else None,
+                    )
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                transient_reason = "TIMEOUT"
+                logger.warning(
+                    "Modelo visual %s: %s; %s",
+                    model_id, type(exc).__name__,
+                    "tentando fallback" if not is_fallback else "sem fallback restante",
                 )
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            logger.error("Falha de rede na análise visual: %s", type(exc).__name__)
-            raise OmniRouteError("Falha temporária na análise visual.", 504) from exc
-        except httpx.HTTPStatusError as exc:
-            logger.error("OmniRoute recusou análise visual com HTTP %s", exc.response.status_code)
-            status_code = 429 if exc.response.status_code == 429 else 502
-            raise OmniRouteError("Falha temporária na análise visual.", status_code) from exc
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
-            logger.error("Resposta inválida do OmniRoute na análise visual")
-            raise OmniRouteError("Resposta inválida na análise visual.") from exc
+                if is_fallback:
+                    break
+                continue
+            except httpx.HTTPStatusError as exc:
+                logger.error("OmniRoute recusou análise visual com HTTP %s", exc.response.status_code)
+                status_code = 429 if exc.response.status_code == 429 else 502
+                raise OmniRouteError("Falha temporária na análise visual.", status_code) from exc
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                logger.error("Resposta inválida do OmniRoute na análise visual")
+                raise OmniRouteError("Resposta inválida na análise visual.") from exc
+
+        raise OmniRouteError(
+            f"Todos os modelos visuais indisponíveis ({transient_reason or 'UNKNOWN'}).",
+            503,
+        )
 
     async def search(
         self,

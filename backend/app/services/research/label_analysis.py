@@ -238,6 +238,8 @@ class LabelAnalysisService:
         calls = 0
         latency = 0
         model = self.settings.omniroute_vision_model
+        fallback_used = False
+        fallback_reason = None
         validated = None
         last_error = "INVALID_LABEL_JSON"
         for attempt in range(2):
@@ -249,6 +251,8 @@ class LabelAnalysisService:
                 calls += 1
                 latency += completion.latency_ms
                 model = completion.model or model
+                fallback_used = completion.fallback_used
+                fallback_reason = completion.fallback_reason
                 parsed = _parse_json(completion.content)
                 if image.image_type == "WASH_LABEL":
                     attributes = _calibrate_wash(LlmWashLabelAttributes.model_validate(parsed))
@@ -318,8 +322,8 @@ class LabelAnalysisService:
 
         cache.put(cache_key, validated.model_dump(mode="json"))
         logger.info(
-            "label_analysis file_id=%s code=%s image_id=%s type=%s prompt=%s model=%s llm_used=true cache=MISS latency_ms=%s status=%s",
+            "label_analysis file_id=%s code=%s image_id=%s type=%s prompt=%s model=%s fallback_used=%s fallback_reason=%s llm_used=true cache=MISS latency_ms=%s status=%s",
             file_id, image.product_code, image.image_id, image.image_type,
-            prompt_version, model, latency, validated.status,
+            prompt_version, model, fallback_used, fallback_reason, latency, validated.status,
         )
         return validated, calls, 0, 1
