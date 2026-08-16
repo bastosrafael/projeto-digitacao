@@ -2046,3 +2046,111 @@ Quando a cota do modelo visual gratuito estiver novamente disponível:
 - **FASE 7D — PILOTO MULTIMODAL COMPLETO COM 2–3 PRODUTOS REAIS.**
 - A Fase 7D deverá validar o pipeline completo com múltiplos produtos antes da geração DUIMP.
 - Não iniciar automaticamente.
+
+## 2026-08-16 — Fallback visual gratuito
+
+### Auditoria do OmniRoute 3.8.49
+
+- Catálogo total: 687 modelos listados em `/v1/models`.
+- Rotas combo com fallback nativo: `auto/vision`, `auto/best-vision`, `auto/best-free` — todas `owned_by: combo`.
+- Nenhuma rota combo gratuita específica para visão foi encontrada.
+- `auto/best-free` roteou para `openai/gpt-4o-mini` (potencialmente pago) — descartado como fallback garantido.
+- `auto/vision` e `auto/best-vision` podem rotear para modelos pagos — descartados.
+- **Conclusão: OmniRoute NÃO possui fallback nativo gratuito confiável para visão.** Fallback implementado no backend.
+
+### Modelos visuais gratuitos auditados
+
+| Modelo | Vision | Free | Latência | Status |
+|--------|--------|------|----------|--------|
+| `oc/mimo-v2.5-free` | ✅ declarado | ✅ | ~5-9s | Principal. Rate limited intermitentemente. |
+| `gemma-4-31b-it:free` | ✅ testado | ✅ | <5s | **Fallback validado.** Google Gemma 4 multimodal. |
+| `gemma-4-26b-a4b-it:free` | ✅ testado | ✅ | <5s | Alternativa MoE menor. Respostas mais detalhadas. |
+| `nemotron-nano-12b-v2-vl:free` | ❌ timeout | ✅ | >120s | Descartado. Timeout em 30s e 120s. |
+
+### Modelos DuckDuckGo (`ddgw/`)
+
+- `ddgw/gpt-5.4-mini`, `ddgw/gpt-5.4-nano`, `ddgw/claude-haiku-4-5`: listados no catálogo, mas classificação de termos de uso `avoid`. Não utilizados.
+
+### Modelos Qwen VL
+
+- `qwen3-vl-8b-instruct`, `qwen3-vl-32b-instruct`, `qwen3-vl-235b-a22b-instruct`: disponíveis, mas gratuidade não comprovada (sem `:free` no ID). Não utilizados.
+
+### Testes com imagem sintética
+
+- Imagem de teste: quadrado vermelho 64×64 com círculo azul centralizado, PNG, 407 bytes data URL.
+- `oc/mimo-v2.5-free`: rate limited (429) no momento do teste.
+- `gemma-4-31b-it:free`: "This image consists of a blue circle centered on a red background." — CORRETO.
+- `gemma-4-26b-a4b-it:free`: "This image features a large red square that serves as the background. In the center of the square is a blue circle." — CORRETO.
+- `nemotron-nano-12b-v2-vl:free`: timeout em 30s e 120s. DESCARTADO.
+
+### Implementação no backend
+
+- `OmniRouteCompletion` estendido com `fallback_used: bool` e `fallback_reason: str | None`.
+- `complete_vision_json` reimplementado com loop sobre candidatos: tenta primary, se falhar por erro transitório (429, 5xx, timeout), tenta fallback.
+- Erros permanentes (400, JSON inválido, conteúdo vazio) NÃO acionam fallback.
+- Se todos falharem: `OmniRouteError` com status 503 e reason documentado.
+- `OmniRouteCompletion.fallback_used` e `fallback_reason` propagados aos callers (`visual_analysis.py`, `label_analysis.py`) e registrados nos logs.
+- Cache key continua baseada no modelo primário configurado; fallback funciona transparentemente.
+
+### Configuração
+
+- `OMNIROUTE_VISION_MODEL=oc/mimo-v2.5-free` (principal, inalterado).
+- `OMNIROUTE_VISION_FALLBACK_MODEL=openai-compatible-chat-38d59294-9537-4ebf-a7bd-c8853db07903/google/gemma-4-31b-it:free` (novo).
+- Fallback pode ser desativado com `OMNIROUTE_VISION_FALLBACK_MODEL=` (string vazia).
+
+### Testes automatizados
+
+- Criado `tests/test_vision_fallback.py` com 14 testes:
+  - Primary OK → sem fallback;
+  - Primary 429 → fallback funciona;
+  - Primary timeout → fallback funciona;
+  - Primary 502 → fallback funciona;
+  - Primary 400 → sem fallback (erro permanente);
+  - Primary conteúdo vazio → sem fallback;
+  - Ambos rate limited → 503;
+  - Ambos timeout → 503;
+  - Sem fallback configurado → só primary;
+  - Modelo efetivo da resposta;
+  - Fallback model usado quando resposta sem model;
+  - Gate de custo: primary e fallback são free;
+  - Config padrão é free.
+- Suíte total: 148 passed (134 existentes + 14 novos).
+
+### Arquivos alterados
+
+- `backend/app/services/omniroute.py`: fallback em `complete_vision_json`;
+- `backend/app/config.py`: `omniroute_vision_fallback_model`;
+- `backend/app/services/research/visual_analysis.py`: propagação de fallback;
+- `backend/app/services/research/label_analysis.py`: propagação de fallback;
+- `backend/.env.example`: documentação da variável;
+- `backend/tests/test_vision_fallback.py`: 14 testes novos.
+
+### Custo
+
+- **US$ 0.** Ambos os modelos são gratuitos comprovados.
+
+### Commit e push
+
+- `d9d67ba feat: adiciona fallback gratuito para analise visual`.
+- Push normal em `origin/main`. Sem force push.
+
+### Gate
+
+1. Fallback visual auditado: SIM.
+2. Segundo modelo gratuito validado: SIM (`gemma-4-31b-it:free`).
+3. Nenhum modelo pago: SIM.
+4. `mimo-v2.5-free` continua principal: SIM.
+5. Fallback apenas em erros transitórios: SIM.
+6. Modelo efetivo registrado: SIM.
+7. Cache correto: SIM.
+8. Testes passam: SIM (148).
+9. Fase 7C intacta: SIM.
+10. Frontend inalterado: SIM.
+
+**GATE APROVADO.**
+
+### Próximo passo
+
+- Redeploy manual no Coolify se Auto Deploy não iniciar.
+- **FASE 7D — PILOTO MULTIMODAL COMPLETO COM 2–3 PRODUTOS REAIS.**
+- Não iniciar automaticamente.
