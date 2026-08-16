@@ -1871,3 +1871,178 @@ Quando a cota do modelo visual gratuito estiver novamente disponível:
 - Storage persistente RW preservado: host `/opt/projeto-digitacao/data/uploads` -> container `/data/uploads`.
 - SearXNG preservado em `127.0.0.1:8888`; OmniRoute preservado na porta 20128.
 - UI aprovada e LOCKED no commit visual `fc53ebb`.
+
+## 2026-08-16 — Retomada e conclusão da Fase 7C
+
+### Recuperação do checkpoint
+
+- Checkpoint recuperado de `memoria.md` (linhas 1787–1874): Fase 7C com código, schemas, prompts, caches, endpoint e 134 testes concluídos; piloto bloqueado por rate limit do `oc/mimo-v2.5-free` em 2026-08-14.
+- Último commit: `6126f1f docs: registra pausa da fase 7c por rate limit`.
+- `origin/main` sincronizado; working tree limpa.
+
+### Estado de produção antes da retomada
+
+- `/health` local: HTTP 200, `{"status":"ok"}`.
+- `/health` público: HTTP 200, `{"status":"ok"}`.
+- Container `2b4a88057993`: `Up 7 minutes (healthy)`.
+- Bind `127.0.0.1:18001:8000` confirmado por `ss`.
+- Mount RW: `/opt/projeto-digitacao/data/uploads` -> `/data/uploads`.
+- Funnel `:8443` OK.
+- SearXNG `127.0.0.1:8888` OK.
+- OmniRoute porta 20128, modelo `oc/mimo-v2.5-free` listado.
+
+### Piloto principal WW77# — execução completa
+
+- Chamada única de teste de rate limit: `POST /api/uploads/c21b5d16.../research/multimodal/labels` com `product_ids=["WW77#"]`.
+- **Rate limit liberado.** Chamada concluída sem erro HTTP 429.
+
+#### PRODUCT_IMAGE (IMG-00001)
+
+- Cache: HIT (da Fase 7B).
+- Modelo: `mimo-v2.5-free`.
+- Status: OK.
+- Atributos: `dress`, `pink`, `off-the-shoulder`, `knee-length`, `ruffle neckline`, `floral pattern`, `cinched waist`.
+- `llm_used=false`.
+
+#### WASH_LABEL (IMG-00002)
+
+- Status: OK.
+- Modelo: `mimo-v2.5-free`.
+- Latência: 9.067 ms.
+- Cache: MISS (primeira execução real).
+- `llm_used=true`.
+- Raw visible text: `TELA EXTERIOR: 100%POLIÉSTER`, `TELA INTERIOR: 95%POLIÉSTER 5%ELASTANO`, `FABRICADO NA CHINA`.
+- Composição: 100% polyester (exterior), 95% polyester + 5% elastane (interior).
+- `composition_sum=200`, `composition_sum_valid=false` (correto — são duas camadas separadas de tecido, não uma única composição).
+- Size: UNKNOWN. Brand: UNKNOWN. Style code: UNKNOWN.
+- Country of origin: China (HIGH confidence).
+- Care instructions: Hand wash at 30°C, Do not bleach, Do not tumble dry, Iron at medium temperature (up to 150°C), Do not dry clean.
+- Warnings: `composition_percentage_sum_invalid` — documentado corretamente como duas camadas separadas.
+- Evidence ID: `WASH-001`.
+
+#### HANGTAG (IMG-00003)
+
+- Status: OK.
+- Modelo: `mimo-v2.5-free`.
+- Latência: 5.740 ms.
+- Cache: MISS (primeira execução real).
+- `llm_used=true`.
+- Raw visible text: `Liu`, `FASHION`.
+- Brand: `Liu FASHION` (HIGH confidence).
+- Style code: UNKNOWN. Model: UNKNOWN. Size: UNKNOWN. Declared color: UNKNOWN. SKU: UNKNOWN.
+- Barcode text: UNKNOWN.
+- Composition: vazia.
+- Warnings: nenhuma.
+- Evidence ID: `HANGTAG-001`.
+
+#### Cross-evidence
+
+- Decisão: `REVIEW`. Confiança: `MEDIUM`.
+- `internal_support`: MODERATE.
+- `external_support`: NONE.
+- Modelo textual: `big-pickle`. Latência: 24.207 ms.
+- Prompt: `labels-multimodal-analysis-v1`.
+- Cache: MISS (primeira execução).
+
+#### Confirmed fields
+
+- `brand`: `Liu FASHION` (HANGTAG-001).
+- `construction`: `梭织` (PACKING-001).
+- `manufacturer`: `蒋培英` (PACKING-001).
+- `ncm`: `6104.43.00` (PACKING-001).
+- `item_name`: `连衣裙` (PACKING-001).
+- `code`: `WW77#` (PACKING-001).
+- `country_of_origin`: `China` (WASH-001).
+- `category_visual`: `dress` (VISUAL-001).
+- `primary_color`: `pink` (VISUAL-001).
+- `sleeves`: `off-the-shoulder` (VISUAL-001).
+- `length`: `knee-length` (VISUAL-001).
+- `visible_details`: `ruffle neckline, floral pattern, cinched waist` (VISUAL-001).
+
+#### Conflitos
+
+- `composition`: Packing List (`面料：100%涤 里布：95%涤 5%氨纶`) vs WASH_LABEL (`polyester polyester elastane`). Conflito de formato/texto, não de substância — a composição em si é consistente (exterior 100% poliéster, interior 95% poliéster + 5% elastano).
+
+#### Unknown fields
+
+- `size`, `style_code_from_label`, `sku_from_label`, `barcode_text`, `material`, `weight`, `dimensions`, `capacity`, `purpose`, `voltage`, `power`, `frequency`, `battery`, `recharge`, `connection`, `accessories`, `color`.
+
+#### Warnings
+
+- Soma de composição 200% explicada como duas camadas separadas de tecido (exterior + interior).
+- Brand `Liu FASHION` presente apenas no hangtag, não corroborada por Packing List ou Wash Label.
+- Evidência visual não pode confirmar composição, fabricante, NCM ou propriedades invisíveis.
+
+### Cache replay
+
+- Segunda chamada idêntica: todas as 4 camadas retornaram `HIT`.
+- Visual: HIT. Wash: HIT. Hangtag: HIT. Labels-multimodal: HIT.
+- Zero chamadas LLM no replay.
+
+### Segundo produto CY2926
+
+- `CY2926`: possui PRODUCT_IMAGE + WASH_LABEL + HANGTAG.
+- PRODUCT_IMAGE: executada com sucesso (modelo `mimo-v2.5-free`, 1 LLM call, cache MISS).
+- WASH_LABEL: **OmniRouteError** (HTTP 429 — rate limit voltou).
+- HANGTAG: **OmniRouteError** (HTTP 429).
+- Resultado: `REVIEW/LOW`, `internal_support=NONE`, `external_support=NONE`, labels não processadas.
+- Conforme regra: rate limit voltou → PARAR. CY2926 permanece pendente para execução futura quando a cota resetar.
+
+### LLM calls totais da sessão
+
+- WW77#: visual=0 (cache HIT), wash=1, hangtag=1, textual=2.
+- WW77# replay: visual=0, wash=0, hangtag=0, textual=0 (4 cache HITs).
+- CY2926: visual=1, wash=0 (rate limited), hangtag=0 (rate limited), textual=2.
+- **Total: 5 chamadas LLM reais + 4 cache hits.**
+
+### Testes
+
+- `pytest -q`: 134 passed in 3.61s.
+- `python -m compileall app`: limpo.
+- `pip check`: No broken requirements found.
+- `git diff --check`: limpo.
+
+### Gate da Fase 7C
+
+1. WASH_LABEL associada corretamente: SIM (IMG-00002 -> WW77# -> WASH-001).
+2. HANGTAG associada corretamente: SIM (IMG-00003 -> WW77# -> HANGTAG-001).
+3. Análise real executada: SIM (wash 9.067ms, hangtag 5.740ms).
+4. Raw text preservado: SIM (TELA EXTERIOR/INTERIOR composições, FABRICADO NA CHINA, Liu FASHION).
+5. Campos ilegíveis UNKNOWN: SIM (size, brand no wash, style_code, declared_color no hangtag).
+6. Percentuais não inventados: SIM (100%, 95%, 5% — todos legíveis na etiqueta).
+7. Composition validation funcionou: SIM (soma 200% gerou warning correto de camadas separadas).
+8. Evidence IDs válidos: SIM (PACKING-001, VISUAL-001, WASH-001, HANGTAG-001).
+9. Conflitos preservados: SIM (composition Packing vs Wash registrada).
+10. internal_support calculado: SIM (MODERATE).
+11. external_support separado: SIM (NONE).
+12. Cache replay funciona: SIM (4/4 HITs, zero LLM calls).
+13. Testes passam: SIM (134 passed).
+14. Produção saudável: SIM (healthy, mount RW, Funnel OK).
+15. Frontend não mudou: SIM (UI LOCKED fc53ebb).
+16. Nenhuma DUIMP gerada: SIM.
+17. Nenhum lote processado: SIM.
+
+**FASE 7C = CONCLUÍDA.**
+
+### Arquivos alterados
+
+- Nenhum arquivo de código foi alterado nesta sessão.
+- Apenas `memoria.md` e `README.md` atualizados com documentação.
+
+### Commits e push
+
+- Pendente: commit de documentação da conclusão do piloto da Fase 7C.
+- Sem force push.
+
+### Limitações conhecidas
+
+- Rate limit do `oc/mimo-v2.5-free` é intermitente. CY2926 não pôde ser processado por causa disso.
+- Hangtag do WW77# contém pouca informação legível (apenas `Liu FASHION`).
+- Size e style_code não foram encontrados em nenhuma etiqueta.
+- `external_support` permanece NONE para WW77# (sem resultados de search/web).
+
+### Próximo passo
+
+- **FASE 7D — PILOTO MULTIMODAL COMPLETO COM 2–3 PRODUTOS REAIS.**
+- A Fase 7D deverá validar o pipeline completo com múltiplos produtos antes da geração DUIMP.
+- Não iniciar automaticamente.

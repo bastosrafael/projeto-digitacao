@@ -131,6 +131,8 @@ Caches separados:
 - `hangtag-analysis-v1`: `/data/uploads/.hangtag-cache`, TTL sete dias;
 - `labels-multimodal-analysis-v1`: `/data/uploads/.labels-multimodal-cache`, TTL sete dias.
 
+No piloto real com `WW77#`, a WASH_LABEL (`IMG-00002`, JPEG, 200×602, 35.838 bytes) extraiu composição em duas camadas — TELA EXTERIOR 100% POLIÉSTER e TELA INTERIOR 95% POLIÉSTER 5% ELASTANO — com origem na China e instruções de lavagem completas. O HANGTAG (`IMG-00003`, JPEG, 292×666, 59.316 bytes) identificou a marca `Liu FASHION`; demais campos (style_code, size, declared_color) permaneceram `UNKNOWN` por estarem ilegíveis. O cruzamento retornou `REVIEW/MEDIUM`, `internal_support=MODERATE` e `external_support=NONE`. A composição apresenta conflito de formato (não de substância) entre Packing List (em chinês) e Wash Label (em português), registrado e preservado. O replay teve cache hit em todas as 4 camadas e zero chamadas LLM. **FASE 7C = CONCLUÍDA.**
+
 ## Repositório
 
 - GitHub: `https://github.com/bastosrafael/projeto-digitacao.git`
