@@ -2325,3 +2325,135 @@ Quando a cota do modelo visual gratuito estiver novamente disponível:
 - Aguardar rate limit resetar para completar CY2926 e N260309#.
 - **FASE 8 — geração da descrição técnica objetiva para DUIMP** (somente com nova autorização).
 - Não iniciar automaticamente.
+
+## 2026-08-16 — Fase 8A: gerador piloto de descrição técnica DUIMP
+
+### Arquitetura
+
+- **Fact Ledger** (`fact_ledger.py`): construtor determinístico que transforma o resultado consolidado do labels_multimodal em fatos com status CONFIRMED/CONFLICTING/UNKNOWN/UNCERTAIN. Somente CONFIRMED alimenta a descrição.
+- **Schemas** (`duimp_schemas.py`): `FactEntry`, `FactLedger`, `CompositionLayer`, `Claim`, `LlmDuimpDescription`, `DuimpDescriptionResult` — todos Pydantic estritos com `extra="forbid"`.
+- **Prompt** (`duimp_description_v1.txt`): instrui o LLM a usar somente fatos CONFIRMED, proíbe invenção, exige claims rastreáveis, composição multicamada separada.
+- **Serviço** (`duimp_description.py`): `DuimpDescriptionService` — lê evidências do cache, constrói fact ledger, envia ao LLM textual, valida claims contra fatos permitidos, retry corretivo (máx 1), cache próprio.
+- **Endpoint**: `POST /api/uploads/{file_id}/duimp/generate` — máximo 1 produto, lê evidências existentes sem re-executar pipeline visual.
+- **Cache**: `duimp-description-v1` em `/data/uploads/.duimp-description-cache`, TTL 7 dias, chave por produto + hash dos fatos + prompt version.
+
+### Piloto WW77# — Fact Ledger
+
+**CONFIRMED:**
+- `product_code`: WW77# [PACKING-001]
+- `item_name`: vestido (normalizado de 连衣裙) [PACKING-001]
+- `category`: vestido (normalizado de dress) [VISUAL-001]
+- `ncm`: 6104.43.00 [PACKING-001]
+- `construction`: tecido plano (normalizado de 梭织) [PACKING-001]
+- `manufacturer`: 蒋培英 [PACKING-001]
+- `brand`: Liu FASHION [HANGTAG-001]
+- `country_of_origin`: China [WASH-001]
+- `primary_color`: pink [VISUAL-001]
+- `length`: knee-length [VISUAL-001]
+- `visible_details`: ruffle neckline, floral pattern, cinched waist [VISUAL-001]
+- `composition` (2 camadas): exterior 100% poliéster, interior 95% poliéster + 5% elastano [WASH-001]
+
+**CONFLICTING:**
+- `composition`: PACKING-001 (面布：100%涤 里布：95%涤 5%氨纶) vs WASH-001 (polyester polyester elastane). Conflito de formato, não de substância. Wash label usada como fonte detalhada.
+
+**UNCERTAIN:**
+- `sleeves`: off-the-shoulder (marcado UNCERTAIN por ambiguidade com straps no visual)
+
+**UNKNOWN:**
+- `size`, `straps`, `style_code_from_label`, `sku_from_label`, `barcode_text`
+
+**EXCLUDED da descrição:**
+- `size` (UNKNOWN)
+- `sleeves` (UNCERTAIN)
+- `straps` (UNKNOWN)
+
+### Descrição gerada
+
+> VESTIDO DE TECIDO PLANO, COMPOSIÇÃO: TELA EXTERIOR: 100% POLIÉSTER; TELA INTERIOR: 95% POLIÉSTER E 5% ELASTANO, COR ROSA, COMPRIMENTO ATÉ O JOELHO, DECOTE COM BABADOS, ESTAMPA FLORAL, CINTURA MARCADA, ORIGEM CHINA.
+
+### Claims
+
+| ID | Field | Value | Evidence IDs |
+|----|-------|-------|--------------|
+| CLAIM-001 | category | vestido | PACKING-001, VISUAL-001 |
+| CLAIM-002 | construction | tecido plano | PACKING-001 |
+| CLAIM-003 | composition | TELA EXTERIOR: 100% POLIÉSTER; TELA INTERIOR: 95% POLIÉSTER E 5% ELASTANO | WASH-001 |
+| CLAIM-004 | primary_color | rosa | VISUAL-001 |
+| CLAIM-005 | length | comprimento até o joelho | VISUAL-001 |
+| CLAIM-006 | visible_details | decote com babados, estampa floral, cintura marcada | VISUAL-001 |
+| CLAIM-007 | country_of_origin | China | WASH-001 |
+
+### Validação
+
+- Status: GENERATED
+- Confidence: MEDIUM (conflito de formato na composição reduziu de HIGH)
+- Modelo efetivo: `hy3-free` (via `auto/coding:free`)
+- Latência: 45.941 ms
+- `llm_used`: true
+- Nenhuma chamada visual executada (evidências já em cache)
+- Nenhum search novo executado
+- Composição multicamada preservada (exterior/interior separados)
+- Marca (Liu FASHION) não incluída na descrição (disponível mas não necessária)
+- Fabricante não incluído na descrição
+- Sleeves UNCERTAIN corretamente excluído
+- Size UNKNOWN corretamente excluído
+- PRODUCT_IMAGE não usada para composição
+
+### Cache replay
+
+- Segunda chamada: cache HIT, `llm_used=false`, `latency_ms=0`.
+- Mesma descrição, mesmos 7 claims, mesmo confidence.
+
+### Testes
+
+- 170 passed (148 existentes + 22 novos da Fase 8A).
+- `compileall`: limpo.
+- `pip check`: limpo.
+- `git diff --check`: limpo.
+
+### Arquivos criados
+
+- `backend/app/services/research/duimp_schemas.py` — schemas Pydantic estritos.
+- `backend/app/services/research/fact_ledger.py` — construtor determinístico do ledger.
+- `backend/app/services/research/duimp_description.py` — serviço de geração + validação.
+- `backend/app/prompts/duimp_description_v1.txt` — prompt versionado.
+- `backend/app/api/duimp.py` — endpoint POST.
+- `backend/tests/test_duimp_description.py` — 22 testes automatizados.
+
+### Arquivos modificados
+
+- `backend/app/config.py` — variáveis `duimp_description_cache_dir`, `duimp_description_cache_ttl_seconds`, `duimp_description_timeout_seconds`.
+- `backend/app/main.py` — registro do `duimp_router`.
+- `backend/.env.example` — documentação das variáveis.
+
+### Commits
+
+- `bb302d4 feat: adiciona gerador tecnico duimp com rastreabilidade`
+
+### Gate da Fase 8A
+
+1. Endpoint funcionando em produção: SIM.
+2. WW77# com Fact Ledger válido: SIM.
+3. Descrição usa somente fatos permitidos: SIM (7 claims, todos CONFIRMED).
+4. Claims rastreáveis: SIM (todos com evidence IDs reais).
+5. UNKNOWN/UNCERTAIN não entraram no texto: SIM (size, sleeves, straps excluídos).
+6. Composição multicamada correta: SIM (exterior e interior separados).
+7. Marca ≠ fabricante: SIM (Liu FASHION ≠ 蒋培英, ambos preservados no ledger).
+8. Visual não comprova composição: SIM (composição vem de WASH-001).
+9. Replay com cache: SIM (HIT, zero LLM calls).
+10. Testes passam: SIM (170 passed).
+11. Frontend inalterado: SIM (UI LOCKED fc53ebb).
+
+**FASE 8A = CONCLUÍDA.**
+
+### Limitações
+
+- Confidence MEDIUM devido ao conflito de formato na composição. Com resolução futura (tradução determinística chinês→português), poderia subir para HIGH.
+- Brand (Liu FASHION) disponível mas não incluída na descrição — decisão do LLM de manter foco técnico.
+- NCM disponível no ledger mas não incluído na descrição textual — pode ser adicionado como campo separado em fase futura.
+
+### Próximo passo
+
+- **FASE 8B — validar geração técnica com 2–3 produtos reais de perfis diferentes.**
+- Somente com nova autorização.
+- Não iniciar automaticamente.
