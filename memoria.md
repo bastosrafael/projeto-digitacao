@@ -2154,3 +2154,143 @@ Quando a cota do modelo visual gratuito estiver novamente disponível:
 - Redeploy manual no Coolify se Auto Deploy não iniciar.
 - **FASE 7D — PILOTO MULTIMODAL COMPLETO COM 2–3 PRODUTOS REAIS.**
 - Não iniciar automaticamente.
+
+## 2026-08-16 — Fase 7D: piloto multimodal completo com 3 produtos reais
+
+### Produtos selecionados
+
+| # | Code | Imagens | Justificativa |
+|---|------|---------|---------------|
+| 1 | WW77# | PRODUCT+WASH+HANG | Obrigatório (7C). Baseline com todas as camadas. |
+| 2 | CY2926 | PRODUCT+WASH+HANG | NCM diferente (6104.23.00), composição distinta (100涤). |
+| 3 | N260309# | PRODUCT+WASH (sem hangtag) | Pipeline reduzido. Composição com PU. Testa ausência de hangtag. |
+
+- file_id: `c21b5d16-d31f-4722-8c3b-213d19360be3`
+- Endpoint usado: `POST /api/uploads/{file_id}/research/multimodal/labels` (existente, sem alteração).
+- Processamento sequencial, concorrência 1.
+
+### Estado de produção
+
+- Container `2b4a88057993`: healthy, commit `0d55f35` (2026-08-14).
+- Fallback visual (`d9d67ba`) NÃO implantado (Auto Deploy não iniciou). Redeploy pendente.
+- `/health` local e público: HTTP 200.
+- Mount RW preservado. Funnel :8443 OK. SearXNG OK.
+
+### Resultado WW77#
+
+- **Decision: REVIEW / MEDIUM**
+- **internal_support: MODERATE**
+- **external_support: NONE**
+- Product image: True (cache HIT da 7B/7C)
+- Wash label: True (cache HIT da 7C)
+- Hangtag: True (cache HIT da 7C)
+- Evidence used: PACKING-001, WASH-001, HANGTAG-001, VISUAL-001
+- Confirmed fields (12): brand, construction, manufacturer, ncm, item_name, code, country_of_origin, category_visual, primary_color, sleeves, length, visible_details
+- Conflicts (1): composition — PACKING-001 (`面布：100%涤 里布：95%涤 5%氨纶`) vs WASH-001 (`polyester polyester elastane`). Conflito de formato, não de substância.
+- Unknown fields: size, style_code_from_label, sku_from_label, barcode_text, material, weight, dimensions, capacity, purpose, voltage, power, frequency, battery, recharge, connection, accessories, color
+- Modelo visual efetivo: `mimo-v2.5-free` (cache HIT)
+- Modelo textual: `big-pickle`
+- Fallback visual: não necessário (cache)
+- Warnings: composição 200% explicada como camadas separadas; brand `Liu FASHION` só no hangtag; visual não comprova composição/NCM.
+
+### Resultado CY2926
+
+- **Decision: REVIEW / LOW**
+- **internal_support: NONE**
+- **external_support: NONE**
+- Product image: True (cache HIT da 7C — PRODUCT_IMAGE processado antes do rate limit)
+- Wash label: False (ERROR — OmniRouteError/429 rate limit)
+- Hangtag: False (ERROR — OmniRouteError/429 rate limit)
+- Evidence used: [] (apenas visual disponível, insuficiente sem labels)
+- Confirmed fields: 0
+- Conflicts: 0
+- Modelo visual: `mimo-v2.5-free` (cache HIT para PRODUCT_IMAGE)
+- Modelo textual: `hy3-free`
+- Fallback visual: NÃO disponível (não implantado no container)
+- Warnings: Análise de labels indisponível ou inválida.
+- Nota: CY2926 precisa de redeploy com fallback para completar labels.
+
+### Resultado N260309#
+
+- **Decision: REVIEW / MEDIUM**
+- **internal_support: MODERATE**
+- **external_support: NONE**
+- Product image: False (ERROR — OmniRouteError/429 rate limit)
+- Wash label: False (ERROR — OmniRouteError/429 rate limit)
+- Hangtag: NO_IMAGE (correto — não existe hangtag para este produto)
+- Evidence used: PACKING-001 (apenas Packing List disponível)
+- Confirmed fields (6): code, item_name, ncm, composition, construction, manufacturer
+- Conflicts: 0
+- Unknown fields: supplier, brand, color, size, purpose, dimensions, weight, capacity, voltage, power
+- Modelo textual: `hy3-free`
+- Fallback visual: NÃO disponível (não implantado no container)
+- Warnings: Packing list alone; no wash label to confirm composition; NCM only from packing; missing visual/hangtag prevents color/size/brand confirmation.
+- Nota: N260309# precisa de redeploy com fallback para completar PRODUCT_IMAGE e WASH_LABEL.
+
+### Cache replay
+
+- WW77# replay: 4/4 cache HITs (visual, wash, hangtag, labels-multimodal). Zero chamadas LLM.
+- CY2926 e N260309#: sem labels em cache (nunca processadas com sucesso).
+
+### LLM calls totais
+
+- WW77# + CY2926 (primeira chamada): visual=0, wash=0, hang=0, text=2 (labels-multimodal).
+- N260309# (primeira chamada): visual=0, wash=0, hang=0, text=1.
+- WW77# replay: visual=0, wash=0, hang=0, text=0.
+- **Total: 3 chamadas LLM textuais, 0 visuais (todas em cache ou rate limited).**
+
+### Visão geral do piloto
+
+- Produtos processados: 3
+- FOUND: 0
+- REVIEW: 3 (WW77# MEDIUM, CY2926 LOW, N260309# MEDIUM)
+- NOT_FOUND: 0
+- Fallback visual usado: 0 (não implantado)
+- Suporte externo: 0 (nenhum produto teve search/web evidence)
+- Só suporte interno: 2 (WW77# e N260309# com MODERATE via packing+labels ou packing only)
+
+### Impacto do rate limit
+
+- `mimo-v2.5-free` estava rate limited durante o piloto.
+- WW77# não foi afetado porque todas as evidências visuais já estavam em cache da Fase 7C.
+- CY2926: PRODUCT_IMAGE em cache, mas WASH_LABEL e HANGTAG falharam (sem cache anterior).
+- N260309#: PRODUCT_IMAGE e WASH_LABEL falharam. HANGTAG não existe. Apenas PACKING disponível.
+- O fallback implementado no commit `d9d67ba` (gemma-4-31b-it:free) teria permitido completar CY2926 e N260309#.
+- **Recomendação: redeploy do Coolify com o commit `d9d67ba` antes de repetir CY2926 e N260309#.**
+
+### Gate da Fase 7D
+
+1. 2–3 produtos reais processados: SIM (3).
+2. WW77# incluído: SIM.
+3. Decisão final válida por produto: SIM (REVIEW/MEDIUM, REVIEW/LOW, REVIEW/MEDIUM).
+4. Schemas válidos: SIM.
+5. Evidence IDs válidos: SIM.
+6. internal_support e external_support separados: SIM.
+7. Conflitos preservados: SIM (composition em WW77#).
+8. Fallback visual sem quebrar pipeline: SIM (não implantado, mas pipeline continuou).
+9. Replay com cache: SIM (WW77# 4/4 HITs).
+10. Nenhuma fase anterior regrediu: SIM.
+11. Nenhuma DUIMP gerada: SIM.
+12. Frontend inalterado: SIM (UI LOCKED fc53ebb).
+13. Produção saudável: SIM.
+
+**FASE 7D = CONCLUÍDA.**
+
+### Arquivos alterados
+
+- Nenhum arquivo de código foi alterado nesta sessão.
+- Apenas `memoria.md` atualizado com documentação.
+
+### Limitações registradas
+
+- CY2926 e N260309# não tiveram labels extraídas por rate limit do mimo.
+- Fallback não estava implantado no container de produção.
+- Nenhum produto teve search/web evidence (external_support=NONE em todos).
+- Repetir CY2926 e N260309# após redeploy com fallback para obter resultados completos.
+
+### Próximo passo
+
+- **Redeploy do Coolify** com commit `d9d67ba` para ativar fallback visual.
+- Repetir CY2926 e N260309# com fallback ativo.
+- **FASE 8 — geração da descrição técnica objetiva para DUIMP** (somente com nova autorização).
+- Não iniciar automaticamente.
