@@ -558,3 +558,35 @@ Validações da Fase 3E:
 - `POST https://nflnba.tail08f125.ts.net:8443/api/chat`: HTTP 200 e resposta via OmniRoute;
 - NFLNBA em 443: `/`, `/api/health`, `/api/games/upcoming?league=NFL` e `/nfl` permaneceram HTTP 200;
 - `tailscale funnel status` manteve simultaneamente os listeners 443 e 8443.
+
+## Fase 8B — gerador técnico DUIMP generalizado
+
+O gerador de descrição técnica DUIMP foi generalizado para funcionar com diferentes níveis de evidência. O endpoint `POST /api/uploads/{file_id}/duimp/generate` aceita 1 produto por request.
+
+### Gate de suficiência
+
+Antes de chamar o LLM, o serviço avalia deterministicamente se há evidência mínima:
+
+- Pelo menos 1 campo essencial: `category` ou `item_name` (CONFIRMED).
+- Pelo menos 1 campo de suporte: `composition` ou `construction` (CONFIRMED).
+- NCM sozinho NÃO é suficiente.
+- Conflito em campo essencial bloqueia geração.
+- Conflito em campo de suporte (composition/construction) não bloqueia — tratado via confidence MEDIUM.
+
+Se insuficiente: `INSUFFICIENT_EVIDENCE`, `llm_used=false`, sem texto gerado.
+
+### Packing fallback
+
+Quando o resultado `labels_multimodal` não existe para um produto, o endpoint lê a packing list diretamente do XLSX via `analyze_workbook`, constrói um `labels_result` parcial e combina com evidências visuais/wash/hangtag em cache. O campo `packing_fallback: true` indica que essa rota foi usada.
+
+### Normalizações
+
+- **Composição chinesa**: parser determinístico para strings como `100涤` → 100% poliéster, `95棉5氨纶+100pu` → 2 camadas (95% algodão + 5% elastano; 100% PU). Soma > 100% retorna UNKNOWN.
+- **Item name parcial**: `梭织女士套装` contém `套装` → conjunto; `梭织长裤+腰带` contém `长裤` → calça.
+- **Construction**: `梭织` → tecido plano, `针织` → malha.
+
+### Resultado
+
+Campos adicionais na resposta: `packing_fallback` (bool), `sufficiency_reason` (string).
+
+Piloto validado com 3 produtos: WW77# (GENERATED/MEDIUM), CY2926 (GENERATED/HIGH via packing fallback), N260309# (GENERATED/HIGH com composição de 2 camadas). 189 testes passando.

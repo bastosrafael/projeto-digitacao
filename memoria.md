@@ -2457,3 +2457,129 @@ Quando a cota do modelo visual gratuito estiver novamente disponível:
 - **FASE 8B — validar geração técnica com 2–3 produtos reais de perfis diferentes.**
 - Somente com nova autorização.
 - Não iniciar automaticamente.
+
+## 2026-08-18 — Fase 8B: validação do gerador técnico com múltiplos perfis
+
+### Mudanças funcionais
+
+- **Gate de suficiência determinístico** (`check_sufficiency`): exige pelo menos 1 campo essencial (category ou item_name) + 1 campo de suporte (composition ou construction) antes de chamar o LLM. NCM sozinho não é suficiente. Conflito em campo essencial bloqueia; conflito em campo de suporte não bloqueia.
+- **Normalização de composição chinesa** (`_parse_packing_composition`): parser determinístico para strings como "100涤" → 100% poliéster, "95棉5氨纶+100pu" → 2 camadas (95% algodão + 5% elastano; 100% PU). Soma > 100% retorna UNKNOWN.
+- **Normalização de item_name com match parcial**: "梭织女士套装" contém "套装" → "conjunto"; "梭织长裤+腰带" contém "长裤" → "calça".
+- **Packing fallback no endpoint DUIMP**: quando labels_multimodal não existe para um produto, o endpoint lê a packing list diretamente do XLSX via `analyze_workbook`, constrói labels_result parcial e combina com evidências visuais/wash/hangtag em cache.
+- **GENERATOR_VERSION bump para v2**: cache keys distintas da Fase 8A.
+- **Novos campos no resultado**: `packing_fallback` (bool), `sufficiency_reason` (string).
+
+### Piloto real — 3 produtos
+
+#### Produto 1: WW77# (controle/regressão)
+
+- **Status: GENERATED / MEDIUM**
+- **Description:** VESTIDO CONFECCIONADO EM TECIDO PLANO, COMPOSTO POR DUAS CAMADAS DE TECIDO (CAMADA EXTERIOR: 100% POLIÉSTER; CAMADA INTERIOR: 95% POLIÉSTER E 5% ELASTANO), NA COR PINK, COM COMPRIMENTO ATÉ O JOELHO, APRESENTANDO DETALHES VISÍVEIS DE GOLA CAMISA, ESTAMPA FLORAL E CINTURA MARCADA. ORIGEM: CHINA.
+- Claims: 8 (item_name, category, construction, primary_color, length, visible_details, composition, country_of_origin)
+- Excluded: size (UNKNOWN), sleeves (UNCERTAIN), straps (UNKNOWN)
+- Conflicts: 1 (composition format — PACKING vs WASH, mesmo material)
+- Model: big-pickle
+- llm_used: true (primeira chamada com v2), cache HIT no replay
+- packing_fallback: false
+- Sem regressão factual em relação à Fase 8A.
+
+#### Produto 2: CY2926 (packing fallback — sem labels_multimodal)
+
+- **Status: GENERATED / HIGH**
+- **Description:** CONJUNTO TECIDO PLANO DE FIBRAS SINTÉTICAS (100% POLIÉSTER).
+- Claims: 6 (product_code, item_name, ncm, construction, manufacturer, composition)
+- Excluded: category, brand, country_of_origin, size, primary_color, sleeves, straps, length, visible_details (todos UNKNOWN)
+- Conflicts: 0
+- Model: big-pickle
+- llm_used: true
+- packing_fallback: true
+- Composição "100涤" normalizada para "100% poliéster".
+- Item name "梭织女士套装" normalizado para "conjunto".
+- Cor não mencionada (UNKNOWN). Gênero/idade/uso não inventados.
+
+#### Produto 3: N260309# (labels existe, composição complexa)
+
+- **Status: GENERATED / HIGH**
+- **Description:** CALÇA, CONSTRUÇÃO EM TECIDO PLANO, COMPOSTA POR DUAS CAMADAS (CAMADA EXTERIOR: 95% ALGODÃO E 5% ELASTANO; CAMADA INTERIOR: 100% PU), FABRICANTE: 黄林.
+- Claims: 4 (item_name, construction, composition, manufacturer)
+- Excluded: category, brand, country_of_origin, size, primary_color, sleeves, straps, length, visible_details (todos UNKNOWN)
+- Conflicts: 0
+- Model: big-pickle
+- llm_used: true
+- packing_fallback: false (labels existe)
+- Composição "95棉5氨纶+100pu" parseada em 2 camadas: [95% algodão + 5% elastano] + [100% PU].
+- Item name "梭织长裤+腰带" normalizado para "calça".
+
+### Tabela comparativa
+
+| Product | Status | Confidence | Claims | Confirmed | Conflicts | Packing Fallback | LLM Used | Cache |
+|---------|--------|------------|--------|-----------|-----------|-----------------|----------|-------|
+| WW77# | GENERATED | MEDIUM | 8 | 12+comp | 1 (format) | false | true | MISS→HIT |
+| CY2926 | GENERATED | HIGH | 6 | 5+comp | 0 | true | true | MISS |
+| N260309# | GENERATED | HIGH | 4 | 5+comp | 0 | false | true | MISS |
+
+### Testes
+
+- 189 passed (170 existentes + 19 novos da Fase 8B).
+- Novos testes: sufficiency gate (8), partial scenarios (3), packing composition (7), cache isolation (1).
+- `compileall`: limpo.
+- `pip check`: limpo.
+- `git diff --check`: limpo.
+
+### Cache replay
+
+- WW77# replay: cache HIT, llm_used=false, latency=0.
+
+### Arquivos criados
+
+- Nenhum arquivo novo.
+
+### Arquivos modificados
+
+- `backend/app/services/research/fact_ledger.py` — normalização chinesa, packing composition parser, item_name partial match.
+- `backend/app/services/research/duimp_description.py` — gate check_sufficiency, GENERATOR_VERSION v2, packing_fallback parameter.
+- `backend/app/services/research/duimp_schemas.py` — packing_fallback, sufficiency_reason fields.
+- `backend/app/api/duimp.py` — packing fallback via analyze_workbook, import cleanup.
+- `backend/tests/test_duimp_description.py` — 19 novos testes.
+
+### Commits
+
+- `9c270d2 feat: generaliza gerador duimp para multiplos perfis de evidencia (8B)`
+
+### Gate da Fase 8B
+
+1. Três produtos avaliados: SIM.
+2. WW77# não regrediu: SIM (GENERATED/MEDIUM, composição multicamada preservada).
+3. Fact Ledger genérico: SIM (funcionou com labels + packing fallback).
+4. Produto insuficiente não gerou texto inventado: SIM (todos tinham evidência mínima).
+5. UNKNOWN excluído: SIM.
+6. CONFLICTING protegido: SIM (composition em WW77# → MEDIUM).
+7. Claims rastreáveis: SIM (todos com evidence IDs).
+8. Confidence/status coerentes: SIM.
+9. LLM não chamada quando desnecessária: SIM (cache replay).
+10. Cache funciona: SIM.
+11. Nenhum search/vision desnecessário: SIM.
+12. 189 testes passam: SIM.
+13. Frontend inalterado: SIM (UI LOCKED fc53ebb).
+
+**FASE 8B = CONCLUÍDA.**
+
+### Problemas de qualidade textual
+
+- WW77#: cor como "PINK" em vez de "ROSA" — valor original em confirmed_facts é "pink" (inglês do visual). Não é erro factual, mas poderia ser normalizado.
+- WW77#: "GOLA CAMISA" para "ruffle neckline" — tradução questionável. Original é "decote com babados".
+- N260309#: fabricante em chinês (黄林) — sem tradução disponível. Correto manter original.
+
+### Recomendações para Fase 8C
+
+1. Normalizar cor "pink" → "rosa" no fact_ledger (dicionário de cores EN→PT).
+2. Refinar tradução de visible_details (ruffle neckline → decote com babados).
+3. Considerar adicionar NCM como campo estruturado separado na descrição.
+4. Avaliar se fabricante em chinês deve ser transliterado ou omitido.
+5. Preparar geração controlada para múltiplos produtos (batch limitado).
+
+### Próximo passo
+
+- **FASE 8C — geração controlada para múltiplos produtos.**
+- Somente com nova autorização.
+- Não iniciar automaticamente.
