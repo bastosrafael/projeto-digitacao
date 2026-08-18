@@ -110,6 +110,8 @@ class DuimpDescriptionResult(BaseModel):
     latency_ms: int = 0
     llm_used: bool = False
     cache_status: str = "MISS"
+    packing_fallback: bool = False
+    sufficiency_reason: str = ""
 
 
 class DuimpGenerateRequest(BaseModel):

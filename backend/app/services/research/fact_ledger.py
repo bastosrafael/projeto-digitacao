@@ -7,6 +7,7 @@ Somente fatos CONFIRMED alimentam a descrição técnica.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.services.research.duimp_schemas import (
@@ -28,6 +29,26 @@ _FIBER_PT: dict[str, str] = {
     "viscose": "viscose",
     "rayon": "raiom",
 }
+
+_CHINESE_FIBER_PT: dict[str, str] = {
+    "\u6da4": "poli\u00e9ster",
+    "\u6da4\u7eb6": "poli\u00e9ster",
+    "\u68c9": "algod\u00e3o",
+    "\u6c28\u7eb6": "elastano",
+    "\u9526\u7eb6": "nylon",
+    "\u4e1d": "seda",
+    "\u6bdb": "l\u00e3",
+    "\u9ebb": "linho",
+    "\u7c98\u7ea4": "viscose",
+}
+
+_PACKING_COMP_RE = re.compile(
+    r"(\d+)\s*%?\s*"
+    r"(\u6da4\u7eb6|\u6da4|\u68c9|\u6c28\u7eb6|\u9526\u7eb6|\u4e1d|\u6bdb|\u9ebb|\u7c98\u7ea4|PU|pu|spandex)",
+    re.IGNORECASE,
+)
+
+_LAYER_SPLIT_RE = re.compile(r"[+＋]")
 
 _CONSTRUCTION_PT: dict[str, str] = {
     "woven": "tecido plano",
@@ -53,11 +74,77 @@ _ITEM_NAME_PT: dict[str, str] = {
     "\u886c\u886b": "camisa",
     "\u4e0a\u8863": "blusa",
     "\u88e4\u5b50": "cal\u00e7a",
+    "\u957f\u88e4": "cal\u00e7a",
+    "\u5957\u88c5": "conjunto",
+    "\u534a\u8eab\u88d9": "saia",
+    "\u77ed\u88e4": "bermuda",
+    "\u5916\u5957": "casaco",
 }
 
 
 def _normalize_fiber(fiber: str) -> str:
     return _FIBER_PT.get(fiber.lower(), fiber.lower())
+
+
+def _normalize_chinese_fiber(fiber: str) -> str:
+    low = fiber.strip().lower()
+    if low in ("pu", "spandex"):
+        return low.upper() if low == "pu" else "elastano"
+    return _CHINESE_FIBER_PT.get(fiber.strip(), fiber.strip())
+
+
+def _parse_packing_composition(
+    raw: str,
+    evidence_ids: list[str],
+) -> tuple[list[CompositionLayer], str]:
+    """Tenta parse determinístico de composição em string de packing list.
+
+    Suporta padrões como:
+    - "100涤" → 100% poliéster
+    - "95棉5氨纶+100pu" → 2 camadas
+    - "95%涤纶 5%氨纶" → camada única com 2 fibras
+
+    Retorna ([], "UNKNOWN") se não conseguir parsear com segurança.
+    """
+    if not raw or not raw.strip():
+        return [], "UNKNOWN"
+
+    text = raw.strip()
+    layer_parts = _LAYER_SPLIT_RE.split(text)
+
+    layers: list[CompositionLayer] = []
+    for idx, part in enumerate(layer_parts):
+        matches = _PACKING_COMP_RE.findall(part)
+        if not matches:
+            return [], "UNKNOWN"
+
+        fibers = []
+        total = 0
+        for pct_str, fiber_raw in matches:
+            pct = int(pct_str)
+            total += pct
+            normalized = _normalize_chinese_fiber(fiber_raw)
+            fibers.append({
+                "fiber": normalized,
+                "fiber_original": fiber_raw,
+                "percentage": pct,
+            })
+
+        if total > 100:
+            return [], "UNKNOWN"
+
+        layer_name = "main" if len(layer_parts) == 1 else f"layer_{idx + 1}"
+        layers.append(CompositionLayer(
+            layer_name=layer_name,
+            fibers=fibers,
+            status="CONFIRMED",
+            evidence_ids=evidence_ids,
+        ))
+
+    if not layers:
+        return [], "UNKNOWN"
+
+    return layers, "CONFIRMED"
 
 
 def _normalize_construction(value: str) -> str:
@@ -69,7 +156,14 @@ def _normalize_category(value: str) -> str:
 
 
 def _normalize_item_name(value: str) -> str:
-    return _ITEM_NAME_PT.get(value.strip(), value.strip())
+    stripped = value.strip()
+    exact = _ITEM_NAME_PT.get(stripped)
+    if exact:
+        return exact
+    for cn_key, pt_val in _ITEM_NAME_PT.items():
+        if cn_key in stripped:
+            return pt_val
+    return stripped
 
 
 def _make_entry(
@@ -171,7 +265,7 @@ def build_fact_ledger(
 
     # --- composition layers ---
     comp_layers, comp_status, comp_evidence_ids = _build_composition(
-        wash_evidence, conflicts_raw, conflict_fields
+        confirmed, wash_evidence, conflicts_raw, conflict_fields
     )
 
     return FactLedger(
@@ -252,28 +346,25 @@ def _check_sleeves_straps_ambiguity(
 
 
 def _build_composition(
+    confirmed: dict[str, dict],
     wash_evidence: dict[str, Any] | None,
     conflicts_raw: list[dict],
     conflict_fields: set[str],
 ) -> tuple[list[CompositionLayer], str, list[str]]:
-    """Constrói camadas de composição a partir da wash label.
+    """Constrói camadas de composição.
 
+    Prioridade: wash label > packing list composition.
     Se a composição estiver em conflito material, retorna status CONFLICTING.
-    Se a wash label existir com dados legíveis, cria camadas separadas.
     """
     evidence_ids: list[str] = []
 
     if "composition" in conflict_fields:
-        # Check if it's a format conflict (same substance, different representation)
-        # vs a material conflict (different substances)
         comp_conflict = next(
             (c for c in conflicts_raw if c["field"] == "composition"), None
         )
         if comp_conflict:
             sources = comp_conflict.get("sources", [])
-            # If both sources describe the same fibers, it's format-only
             if _is_format_conflict(sources):
-                # Use wash label as authoritative for composition detail
                 if wash_evidence and wash_evidence.get("status") == "OK":
                     return _layers_from_wash(wash_evidence, "CONFIRMED")
                 return [], "CONFLICTING", evidence_ids
@@ -282,6 +373,15 @@ def _build_composition(
 
     if wash_evidence and wash_evidence.get("status") == "OK":
         return _layers_from_wash(wash_evidence, "CONFIRMED")
+
+    # Fallback: composição como string na packing list
+    comp_cf = confirmed.get("composition")
+    if comp_cf and comp_cf.get("value"):
+        raw_comp = str(comp_cf["value"])
+        comp_eids = comp_cf.get("evidence_ids", ["PACKING-001"])
+        layers, status = _parse_packing_composition(raw_comp, comp_eids)
+        if status == "CONFIRMED" and layers:
+            return layers, status, comp_eids
 
     return [], "UNKNOWN", evidence_ids
 

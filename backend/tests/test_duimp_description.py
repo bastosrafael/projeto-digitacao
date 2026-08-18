@@ -16,6 +16,7 @@ from app.services.research.duimp_description import (
     DuimpDescriptionService,
     PROMPT_VERSION,
     GENERATOR_VERSION,
+    check_sufficiency,
 )
 from app.services.research.duimp_schemas import (
     Claim,
@@ -372,3 +373,271 @@ class TestClaimValidation:
         result = asyncio.run(service.generate(_labels_result(), _wash_evidence()))
         # WW77# has 12+ confirmed facts + composition -> HIGH
         assert result.confidence in ("HIGH", "MEDIUM")
+
+
+# ==========================================
+# 4) SUFFICIENCY GATE — Fase 8B
+# ==========================================
+
+class TestSufficiencyGate:
+    def test_sufficient_with_category_and_composition(self):
+        facts = {"category": {"value": "vestido"}, "composition": {"value": "100% polyester"}}
+        ok, reason = check_sufficiency(facts, set())
+        assert ok is True
+        assert reason == "sufficient evidence"
+
+    def test_sufficient_with_item_name_and_construction(self):
+        facts = {"item_name": {"value": "calça"}, "construction": {"value": "tecido plano"}}
+        ok, _ = check_sufficiency(facts, set())
+        assert ok is True
+
+    def test_insufficient_no_facts(self):
+        ok, reason = check_sufficiency({}, set())
+        assert ok is False
+        assert "no confirmed facts" in reason
+
+    def test_insufficient_ncm_alone(self):
+        facts = {"ncm": {"value": "6104.43.00"}, "product_code": {"value": "X"}}
+        ok, reason = check_sufficiency(facts, set())
+        assert ok is False
+        assert "no category or item_name" in reason
+
+    def test_insufficient_no_supporting(self):
+        facts = {"category": {"value": "vestido"}, "primary_color": {"value": "rosa"}}
+        ok, reason = check_sufficiency(facts, set())
+        assert ok is False
+        assert "no composition or construction" in reason
+
+    def test_insufficient_no_essential(self):
+        facts = {"composition": {"value": "100% poliéster"}, "ncm": {"value": "6104"}}
+        ok, reason = check_sufficiency(facts, set())
+        assert ok is False
+        assert "no category or item_name" in reason
+
+    def test_essential_conflict_blocks(self):
+        facts = {"item_name": {"value": "vestido"}, "construction": {"value": "tecido plano"}}
+        ok, reason = check_sufficiency(facts, {"item_name"})
+        assert ok is False
+        assert "conflict in essential" in reason
+
+    def test_supporting_conflict_does_not_block(self):
+        facts = {"item_name": {"value": "vestido"}, "construction": {"value": "tecido plano"}}
+        ok, _ = check_sufficiency(facts, {"composition"})
+        assert ok is True
+
+
+# ==========================================
+# 5) PARTIAL / INSUFFICIENT SCENARIOS — Fase 8B
+# ==========================================
+
+def _packing_only_labels(code: str, confirmed: list[dict], unknown: list[str] | None = None) -> dict:
+    return {
+        "code": code,
+        "product_id": code,
+        "decision": "REVIEW",
+        "confidence": "LOW",
+        "internal_support": "WEAK",
+        "external_support": "NONE",
+        "product_image_used": False,
+        "wash_label_used": False,
+        "hangtag_used": False,
+        "evidence_used": ["PACKING-001"],
+        "confirmed_fields": confirmed,
+        "conflicts": [],
+        "unknown_fields": unknown or [],
+        "warnings": ["Packing list fallback."],
+        "packing_fallback": True,
+    }
+
+
+class TestPartialScenarios:
+    def test_packing_only_sufficient(self, tmp_path):
+        """CY2926-like: packing com item_name, construction, composition → GENERATED."""
+        lr = _packing_only_labels("CY2926", [
+            {"field": "code", "value": "CY2926", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "item_name", "value": "\u68ad\u7ec7\u5973\u58eb\u5957\u88c5", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "ncm", "value": "6104.23.00", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "composition", "value": "100\u6da4", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "construction", "value": "\u68ad\u7ec7", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ])
+        gateway = AsyncMock()
+        gateway.complete_json = AsyncMock(return_value=OmniRouteCompletion(
+            content=json.dumps({
+                "description": "CONJUNTO DE TECIDO PLANO, COMPOSIÇÃO: 100% POLIÉSTER.",
+                "claims": [
+                    {"claim_id": "CLAIM-001", "field": "item_name", "value": "conjunto", "evidence_ids": ["PACKING-001"]},
+                    {"claim_id": "CLAIM-002", "field": "construction", "value": "tecido plano", "evidence_ids": ["PACKING-001"]},
+                    {"claim_id": "CLAIM-003", "field": "composition", "value": "100% poliéster", "evidence_ids": ["PACKING-001"]},
+                ],
+            }), model="m", latency_ms=50,
+        ))
+        service = DuimpDescriptionService(_settings(), gateway, _tmp_cache(tmp_path))
+        result = asyncio.run(service.generate(lr, packing_fallback=True))
+        assert result.status == "GENERATED"
+        assert result.packing_fallback is True
+        assert result.llm_used is True
+        assert "poli\u00e9ster" in result.description.lower() or "POLIÉSTER" in result.description
+
+    def test_insufficient_only_ncm_and_code(self, tmp_path):
+        """N260309# sem composition/construction: INSUFFICIENT sem LLM."""
+        lr = _packing_only_labels("MINIMAL", [
+            {"field": "code", "value": "MINIMAL", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "ncm", "value": "6104.43.00", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ])
+        gateway = AsyncMock()
+        service = DuimpDescriptionService(_settings(), gateway, _tmp_cache(tmp_path))
+        result = asyncio.run(service.generate(lr))
+        assert result.status == "INSUFFICIENT_EVIDENCE"
+        assert gateway.complete_json.call_count == 0
+        assert result.llm_used is False
+
+    def test_description_without_color(self, tmp_path):
+        """Cor UNKNOWN não bloqueia geração."""
+        lr = _packing_only_labels("NOCOLOR", [
+            {"field": "code", "value": "NOCOLOR", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "item_name", "value": "vestido", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "construction", "value": "tecido plano", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ], unknown=["primary_color"])
+        gateway = AsyncMock()
+        gateway.complete_json = AsyncMock(return_value=OmniRouteCompletion(
+            content=json.dumps({
+                "description": "VESTIDO DE TECIDO PLANO.",
+                "claims": [
+                    {"claim_id": "CLAIM-001", "field": "item_name", "value": "vestido", "evidence_ids": ["PACKING-001"]},
+                    {"claim_id": "CLAIM-002", "field": "construction", "value": "tecido plano", "evidence_ids": ["PACKING-001"]},
+                ],
+            }), model="m", latency_ms=50,
+        ))
+        service = DuimpDescriptionService(_settings(), gateway, _tmp_cache(tmp_path))
+        result = asyncio.run(service.generate(lr))
+        assert result.status == "GENERATED"
+        excluded_names = [e.field for e in result.excluded_fields]
+        assert "primary_color" in excluded_names
+
+
+# ==========================================
+# 6) COMPOSITION FROM PACKING — Fase 8B
+# ==========================================
+
+class TestPackingComposition:
+    def test_chinese_100_polyester(self):
+        from app.services.research.fact_ledger import _parse_packing_composition
+        layers, status = _parse_packing_composition("100\u6da4", ["PACKING-001"])
+        assert status == "CONFIRMED"
+        assert len(layers) == 1
+        assert layers[0].fibers[0]["fiber"] == "poli\u00e9ster"
+        assert layers[0].fibers[0]["percentage"] == 100
+
+    def test_chinese_two_layer(self):
+        from app.services.research.fact_ledger import _parse_packing_composition
+        layers, status = _parse_packing_composition("95\u68c95\u6c28\u7eb6+100PU", ["PACKING-001"])
+        assert status == "CONFIRMED"
+        assert len(layers) == 2
+        assert layers[0].fibers[0]["fiber"] == "algod\u00e3o"
+        assert layers[0].fibers[0]["percentage"] == 95
+        assert layers[0].fibers[1]["fiber"] == "elastano"
+        assert layers[0].fibers[1]["percentage"] == 5
+        assert layers[1].fibers[0]["fiber"] == "PU"
+        assert layers[1].fibers[0]["percentage"] == 100
+
+    def test_unparseable_returns_unknown(self):
+        from app.services.research.fact_ledger import _parse_packing_composition
+        layers, status = _parse_packing_composition("material desconhecido", ["PACKING-001"])
+        assert status == "UNKNOWN"
+        assert layers == []
+
+    def test_sum_over_100_returns_unknown(self):
+        from app.services.research.fact_ledger import _parse_packing_composition
+        layers, status = _parse_packing_composition("60\u68c960\u6da4", ["PACKING-001"])
+        assert status == "UNKNOWN"
+
+    def test_fact_ledger_packing_composition_fallback(self):
+        """Fact Ledger usa composição da packing quando wash não existe."""
+        lr = _packing_only_labels("CY2926", [
+            {"field": "code", "value": "CY2926", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "item_name", "value": "\u5957\u88c5", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "composition", "value": "100\u6da4", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "construction", "value": "\u68ad\u7ec7", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ])
+        ledger = build_fact_ledger(lr)
+        assert ledger.composition_status == "CONFIRMED"
+        assert len(ledger.composition_layers) == 1
+        assert ledger.composition_layers[0].fibers[0]["fiber"] == "poli\u00e9ster"
+
+    def test_n260309_composition_two_layers(self):
+        """N260309#: '95棉5氨纶+100pu' → 2 camadas."""
+        lr = _packing_only_labels("N260309#", [
+            {"field": "code", "value": "N260309#", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "item_name", "value": "\u68ad\u7ec7\u957f\u88e4+\u8170\u5e26", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "composition", "value": "95\u68c95\u6c28\u7eb6+100pu", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "construction", "value": "\u68ad\u7ec7", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "manufacturer", "value": "\u9ec4\u6797", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "ncm", "value": "6104.63.00", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ])
+        ledger = build_fact_ledger(lr)
+        assert ledger.composition_status == "CONFIRMED"
+        assert len(ledger.composition_layers) == 2
+        assert ledger.composition_layers[0].fibers[0]["fiber"] == "algod\u00e3o"
+        assert ledger.composition_layers[1].fibers[0]["fiber"] == "PU"
+        # item_name normalizado: contém 长裤 → calça
+        assert ledger.item_name.value == "cal\u00e7a"
+
+    def test_item_name_partial_match(self):
+        """Item name chinês com match parcial (梭织女士套装 contém 套装)."""
+        lr = _packing_only_labels("X", [
+            {"field": "code", "value": "X", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "item_name", "value": "\u68ad\u7ec7\u5973\u58eb\u5957\u88c5", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "construction", "value": "\u68ad\u7ec7", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ])
+        ledger = build_fact_ledger(lr)
+        assert ledger.item_name.value == "conjunto"
+
+
+# ==========================================
+# 7) CACHE ISOLATION — Fase 8B
+# ==========================================
+
+class TestCacheIsolation:
+    def test_different_products_different_cache(self, tmp_path):
+        """Cache keys são distintas para produtos diferentes."""
+        lr1 = _packing_only_labels("P1", [
+            {"field": "code", "value": "P1", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "item_name", "value": "vestido", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "construction", "value": "tecido plano", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ])
+        lr2 = _packing_only_labels("P2", [
+            {"field": "code", "value": "P2", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "item_name", "value": "calça", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+            {"field": "construction", "value": "malha", "evidence_ids": ["PACKING-001"], "source_types": ["packing_list"]},
+        ])
+
+        def _make_response(desc, code):
+            return json.dumps({
+                "description": desc,
+                "claims": [
+                    {"claim_id": "CLAIM-001", "field": "item_name", "value": code, "evidence_ids": ["PACKING-001"]},
+                    {"claim_id": "CLAIM-002", "field": "construction", "value": "x", "evidence_ids": ["PACKING-001"]},
+                ],
+            })
+
+        call_count = 0
+
+        async def _complete(messages, *, timeout_seconds):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return OmniRouteCompletion(content=_make_response("VESTIDO DE TECIDO PLANO.", "vestido"), model="m", latency_ms=50)
+            return OmniRouteCompletion(content=_make_response("CALÇA DE MALHA.", "calça"), model="m", latency_ms=50)
+
+        cache = _tmp_cache(tmp_path)
+        gateway = AsyncMock()
+        gateway.complete_json = AsyncMock(side_effect=_complete)
+        service = DuimpDescriptionService(_settings(), gateway, cache)
+
+        r1 = asyncio.run(service.generate(lr1))
+        r2 = asyncio.run(service.generate(lr2))
+
+        assert r1.product_code == "P1"
+        assert r2.product_code == "P2"
+        assert r1.description != r2.description
+        assert call_count == 2  # cada produto gerou sua própria chamada

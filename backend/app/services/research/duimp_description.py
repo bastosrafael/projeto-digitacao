@@ -36,7 +36,10 @@ from app.services.research.fact_ledger import (
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "duimp-description-v1"
-GENERATOR_VERSION = "duimp-generator-v1"
+GENERATOR_VERSION = "duimp-generator-v2"
+
+_ESSENTIAL_FIELDS = {"category", "item_name"}
+_SUPPORTING_FIELDS = {"composition", "construction"}
 
 _DUIMP_SEMAPHORE = asyncio.Semaphore(1)
 
@@ -103,6 +106,38 @@ def _build_conflicts(labels_result: dict[str, Any]) -> list[DuimpConflict]:
     return conflicts
 
 
+def check_sufficiency(
+    confirmed_facts: dict[str, Any],
+    conflict_fields: set[str],
+) -> tuple[bool, str]:
+    """Gate determinístico: avalia se há evidência suficiente para gerar descrição.
+
+    Retorna (sufficient, reason).
+    NCM sozinho NÃO é suficiente.
+    Precisa de pelo menos 1 essencial (category ou item_name) + 1 suporte (composition ou construction).
+    Conflito em campo essencial (category/item_name) bloqueia.
+    Conflito em campo de suporte (composition/construction) NÃO bloqueia — tratado via confidence.
+    """
+    if not confirmed_facts:
+        return False, "no confirmed facts"
+
+    has_essential = bool(_ESSENTIAL_FIELDS & set(confirmed_facts.keys()))
+    has_supporting = bool(_SUPPORTING_FIELDS & set(confirmed_facts.keys()))
+
+    if not has_essential:
+        return False, "no category or item_name confirmed"
+
+    if not has_supporting:
+        return False, "no composition or construction confirmed"
+
+    # Conflito direto em campo essencial bloqueia
+    essential_in_conflict = _ESSENTIAL_FIELDS & conflict_fields
+    if essential_in_conflict:
+        return False, f"conflict in essential field(s): {', '.join(sorted(essential_in_conflict))}"
+
+    return True, "sufficient evidence"
+
+
 class DuimpDescriptionService:
     def __init__(
         self,
@@ -125,6 +160,7 @@ class DuimpDescriptionService:
         visual_evidence: dict[str, Any] | None = None,
         *,
         refresh_cache: bool = False,
+        packing_fallback: bool = False,
     ) -> DuimpDescriptionResult:
         product_code = labels_result.get("code") or labels_result.get("product_id", "UNKNOWN")
 
@@ -136,8 +172,12 @@ class DuimpDescriptionService:
         excluded_fields = get_excluded_fields(ledger)
         conflicts = _build_conflicts(labels_result)
 
-        # Check minimum evidence
-        if not confirmed_facts:
+        # Gate determinístico de suficiência
+        conflict_fields_set = {c.field for c in conflicts}
+        sufficient, sufficiency_reason = check_sufficiency(
+            confirmed_facts, conflict_fields_set
+        )
+        if not sufficient:
             return DuimpDescriptionResult(
                 product_code=product_code,
                 description="",
@@ -146,9 +186,11 @@ class DuimpDescriptionService:
                 claims=[],
                 excluded_fields=excluded_fields,
                 conflicts=conflicts,
-                warnings=["No confirmed facts available for description generation."],
+                warnings=[f"Insufficient evidence: {sufficiency_reason}"],
                 prompt_version=PROMPT_VERSION,
                 generator_version=GENERATOR_VERSION,
+                llm_used=False,
+                sufficiency_reason=sufficiency_reason,
             )
 
         # Build cache key
@@ -301,6 +343,8 @@ class DuimpDescriptionService:
             latency_ms=latency,
             llm_used=True,
             cache_status="MISS",
+            packing_fallback=packing_fallback,
+            sufficiency_reason="sufficient evidence",
         )
 
         self.cache.put(cache_key, result.model_dump(mode="json"))
